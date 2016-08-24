@@ -44,8 +44,8 @@ exports.send_email = send_email = (opts={}) ->
     opts = defaults opts,
         subject  : required
         body     : required
-        fromname : 'SageMath Inc.'
-        from     : 'office@sagemath.com'
+        fromname : 'Robert Lowe'
+        from     : 'robert.lowe@maryvillecollege.edu'
         to       : required
         replyto  : undefined
         cc       : ''
@@ -109,9 +109,9 @@ exports.send_email = send_email = (opts={}) ->
                 email.setASMGroupID(opts.asm_group)
 
             # this activates template processing
-            email.addFilter('templates', 'enable', 1)
+            #email.addFilter('templates', 'enable', 1)
             # plain template with a header (smc logo), a h1 title, and a footer
-            email.addFilter('templates', 'template_id', '0375d02c-945f-4415-a611-7dc3411e2a78')
+            #email.addFilter('templates', 'template_id', '0375d02c-945f-4415-a611-7dc3411e2a78')
             # This #title# will end up below the header in an <h1> according to the template
             email.addSubstitution("#title#", opts.subject)
 

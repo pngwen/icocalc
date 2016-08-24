@@ -2981,6 +2981,7 @@ forgot_password = (mesg, client_ip_address, push_to_client) ->
                     id = _id; cb(err)
         (cb) ->
             # send an email to mesg.email_address that has a password reset link
+	    # TODO a lot of MC specific stuff in here.  Move to config!
             body = """
                 <div>Hello,</div>
                 <div>&nbsp;</div>
@@ -2990,22 +2991,22 @@ forgot_password = (mesg, client_ip_address, push_to_client) ->
                 <div>&nbsp;</div>
                 <div style="text-align: center;">
                 <span style="font-size:12px;"><b>
-                  <a href="https://cloud.sagemath.com#forgot-#{id}">https://cloud.sagemath.com#forgot-#{id}</a>
+                  <a href="https://smc.cs.maryvillecollege.edu#forgot-#{id}">https://smc.cs.maryvillecollege.edu#forgot-#{id}</a>
                 </b></span>
                 </div>
                 <div>&nbsp;</div>
                 <div>If you don't want to change your password, ignore this message.</div>
                 <div>&nbsp;</div>
                 <div>In case of problems, email
-                <a href="mailto:help@sagemath.com">help@sagemath.com</a> immediately
+                <a href="mailto:robert.lowe@maryvillecollege.edu">robert.lowe@maryvillecollege.edu</a> immediately
                 (or just reply to this email).
                 <div>&nbsp;</div>
                 """
 
             send_email
-                subject : 'SageMathCloud Password Reset'
+                subject : 'Maryville College SageMathCloud Password Reset'
                 body    : body
-                from    : 'SageMath Help <help@sagemath.com>'
+                from    : 'Robert Lowe <robert.lowe@maryvillecollege.edu>'
                 to      : mesg.email_address
                 category: "password_reset"
                 cb      : cb

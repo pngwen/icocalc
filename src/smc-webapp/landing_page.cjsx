@@ -123,7 +123,7 @@ SignUp = rclass
                     bsSize='large'
                     type='submit'
                     block>
-                        {<Icon name="spinner" spin /> if @props.signing_up} Sign up!
+                        {<Icon name="spinner" spin /> if @props.signing_up} Sign up here!
                     </Button>
             </form>
             <div style={textAlign: "center"}>
