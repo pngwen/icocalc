@@ -207,13 +207,13 @@ class exports.Support
         # below the body message, add a link to the location
         # TODO fix hardcoded URL
         if opts.location?
-            url  = "https://" + path.join('cloud.sagemath.com/', opts.location)
+            url  = "https://" + path.join('smc.cs.maryvillecollege.edu/', opts.location)
             body = opts.body + "\n\n#{url}"
         else
             body = opts.body + "\n\nNo location provided."
 
         if misc.is_valid_uuid_string(opts.info.course)
-            body += "\n\nCourse: https://cloud.sagemath.com/projects/#{opts.info.course}"
+            body += "\n\nCourse: https://smc.cs.maryvillecollege.edu/projects/#{opts.info.course}"
 
         # https://developer.zendesk.com/rest_api/docs/core/tickets#request-parameters
         ticket =

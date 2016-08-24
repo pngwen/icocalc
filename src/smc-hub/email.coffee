@@ -141,7 +141,7 @@ exports.mass_email = (opts) ->
     opts = defaults opts,
         subject : required
         body    : required
-        from    : 'SageMath Help <help@sagemath.com>'
+        from    : 'Robert Lowe <robert.lowe@maryvillecollege.edu>'
         to      : required   # array or string (if string, opens and reads from file, splitting on whitspace)
         cc      : ''
         limit   : 10         # number to send in parallel

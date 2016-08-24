@@ -1222,16 +1222,16 @@ class Client extends EventEmitter
                                 base_url = "#{base_url[0]}//#{base_url[2]}"
                                 direct_link = "Then go to <a href='#{mesg.link2proj}'>project '#{mesg.title}'</a>."
                             else # fallback for outdated clients
-                                base_url = 'https://cloud.sagemath.com/'
+                                base_url = 'https://smc.cs.maryvillecollege.edu/'
                                 direct_link = ''
 
                             # asm_group: 699 is for invites https://app.sendgrid.com/suppressions/advanced_suppression_manager
                             opts =
                                 to       : email_address
-                                bcc      : 'invites@sagemath.com'
+                                bcc      : 'robert.lowe@maryvillecollege.edu'
                                 fromname : 'SageMathCloud'
-                                from     : 'invites@sagemath.com'
-                                replyto  : 'help@sagemath.com'
+                                from     : 'robert.lowe@maryvillecollege.edu'
+                                replyto  : 'robert.lowe@maryvillecollege.edu'
                                 subject  : subject
                                 category : "invite"
                                 asm_group: 699
@@ -2492,16 +2492,16 @@ sign_in_check = (opts) ->
     s = sign_in_fails
     if s.email_m[email] > 3
         # A given email address is allowed at most 3 failed login attempts per minute
-        return "Wait a minute, then try to login again.  If you can't remember your password, reset it or email help@sagemath.com."
+        return "Wait a minute, then try to login again.  If you can't remember your password, reset it or email robert.lowe@maryvillecollege.edu."
     if s.email_h[email] > 30
         # A given email address is allowed at most 30 failed login attempts per hour.
-        return "Wait an hour, then try to login again.  If you can't remember your password, reset it or email help@sagemath.com."
+        return "Wait an hour, then try to login again.  If you can't remember your password, reset it or email robert.lowe@maryvillecollege.edu."
     if s.ip_m[ip] > 10
         # A given ip address is allowed at most 10 failed login attempts per minute.
-        return "Wait a minute, then try to login again.  If you can't remember your password, reset it or email help@sagemath.com."
+        return "Wait a minute, then try to login again.  If you can't remember your password, reset it or email robert.lowe@maryvillecollege.edu."
     if s.ip_h[ip] > 50
         # A given ip address is allowed at most 50 failed login attempts per hour.
-        return "Wait an hour, then try to login again.  If you can't remember your password, reset it or email help@sagemath.com."
+        return "Wait an hour, then try to login again.  If you can't remember your password, reset it or email robert.lowe@maryvillecollege.edu."
     return false
 
 sign_in = (client, mesg, cb) ->
@@ -2563,9 +2563,9 @@ sign_in = (client, mesg, cb) ->
                         return
                     if not is_correct
                         if not account.password_hash
-                            cb("The account #{mesg.email_address} exists but doesn't have a password. Either set your password by clicking 'Forgot Password?' or log in using #{misc.keys(account.passports).join(', ')}.  If that doesn't work, email help@sagemath.com and we will sort this out.")
+                            cb("The account #{mesg.email_address} exists but doesn't have a password. Either set your password by clicking 'Forgot Password?' or log in using #{misc.keys(account.passports).join(', ')}.  If that doesn't work, email robert.lowe@maryvillecollege.edu and we will sort this out.")
                         else
-                            cb("Incorrect password for #{mesg.email_address}.  You can reset your password by clicking the 'Forgot Password?' link.   If that doesn't work, email help@sagemath.com and we will sort this out.")
+                            cb("Incorrect password for #{mesg.email_address}.  You can reset your password by clicking the 'Forgot Password?' link.   If that doesn't work, email robert.lowe@maryvillecollege.edu and we will sort this out.")
                     else
                         cb()
         # remember me

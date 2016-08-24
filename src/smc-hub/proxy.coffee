@@ -290,7 +290,7 @@ exports.init_http_proxy_server = (opts) ->
             public_raw req_url, query, res, (err, is_public) ->
                 if err or not is_public
                     res.writeHead(500, {'Content-Type':'text/html'})
-                    res.end("Please login to <a target='_blank' href='https://cloud.sagemath.com'>https://cloud.sagemath.com</a> with cookies enabled, then refresh this page.")
+                    res.end("Please login to <a target='_blank' href='https://smc.cs.maryvillecollege.edu'>https://smc.cs.maryvillecollege.edu</a> with cookies enabled, then refresh this page.")
 
             return
 
@@ -301,7 +301,7 @@ exports.init_http_proxy_server = (opts) ->
                     if err or not is_public
                         winston.debug("proxy denied -- #{err}")
                         res.writeHead(500, {'Content-Type':'text/html'})
-                        res.end("Access denied. Please login to <a target='_blank' href='https://cloud.sagemath.com'>https://cloud.sagemath.com</a> as a user with access to this project, then refresh this page.")
+                        res.end("Access denied. Please login to <a target='_blank' href='https://smc.cs.maryvillecollege.edu'>https://smc.cs.maryvillecollege.edu</a> as a user with access to this project, then refresh this page.")
             else
                 t = "http://#{location.host}:#{location.port}"
                 if proxy_cache[t]?
