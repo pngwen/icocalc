@@ -80,7 +80,6 @@ class ProjectPage
         @init_tabs()
         @init_sortable_editor_tabs()
         @init_new_tab_in_navbar()
-        @free_project_warning()
         @projects_store.wait
             until   : (s) => s.get_my_group(@project_id)
             timeout : 60
@@ -115,61 +114,6 @@ class ProjectPage
         delete @projects_store
         delete @actions
         delete @store
-
-    free_project_warning: () =>
-        if underscore.contains(warning_banner_hidden, @project_id)
-            return
-        @projects_store.wait
-            until   : (s) => s.get_total_project_quotas(@project_id)
-            timeout : 60
-            cb      : (err, quotas) =>
-                if not err and quotas?
-                    host     = not quotas.member_host
-                    internet = not quotas.network
-                    box  = @container.find('.smc-project-free-quota-warning')
-                    {PolicyPricingPageUrl} = require('./customize')
-                    long_warning_server = """
-                    <p>This project runs on a heavily loaded randomly rebooted free server.
-                    Please upgrade your project to run on a members-only server for more reliability and faster code execution.</p>"""
-                    long_warning_internet = """
-                    <p>This project does not have external network access, so you cannot use internet
-                    resources directly from this project; in particular, you can't
-                    install software from the internet,
-                    download from sites like GitHub,
-                    or download data from public data portals.</p>"""
-                    long_warning_info = """
-                    <ul>
-                        <li>Learn about <a href='#{PolicyPricingPageUrl}' class='pricing' target='_blank'>Pricing and Subscriptions</a></li>
-                        <li>Read the billing <a href="#{PolicyPricingPageUrl}#faq" class='faq' target='_blank'>Frequently Asked Questions</a></li>
-                        <li>Visit <a href='#' class='billing'>Billing</a> to <em>subscribe</em> to a plan</li>
-                        <li>Upgrade <em>this</em> project in <a href='#' class='settings'>Project Settings</a></li>
-                    </ul></p>"""
-                    if host or internet
-                        extra = ""
-                        html = "<p><i class='fa fa-exclamation-triangle'></i> WARNING: This project runs"
-                        if host
-                            html += " on a <b>free server</b>"
-                            extra += long_warning_server
-                        if internet
-                            html += " without <b>internet access</b>"
-                            extra += long_warning_internet
-                        html += " &mdash; <a href='#' class='learn'>learn more...</a> "
-                        html += "<a href='#' class='dismiss'>×</a></p>"
-                        html += "<div class='longtext'>#{extra} #{long_warning_info}</div>"
-                        box.find("div").html(html)
-                        box.find('div a.learn').click (evt) ->
-                            box.find('div.longtext').show()
-                        box.find("div a.billing").click (evt) ->
-                            require('./history').load_target('settings/billing')
-                            evt.stopPropagation()
-                        box.find("div a.settings").click =>
-                            @load_target('settings')
-                        box.find(".dismiss").click (evt) =>
-                            warning_banner_hidden.push(@project_id)
-                            box.hide()
-                        box.show()
-                    else
-                        box.hide()
 
 
     init_new_tab_in_navbar: () =>

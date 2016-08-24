@@ -1026,51 +1026,6 @@ exports.CourseProjectWarning = (opts) ->
         {deadline}
     </Alert>
 
-exports.NonMemberProjectWarning = (opts) ->
-    {total, used, avail, course_warning} = project_warning_opts(opts)
-    if course_warning
-        return exports.CourseProjectWarning(opts)
-
-    if avail > 0
-        # have upgrade available
-        suggestion = <span><b><i>You have {avail} unused members-only hosting {misc.plural(avail,'upgrade')}</i></b>.  Click 'Adjust your quotas...' below.</span>
-    else if avail <= 0
-        url = PolicyPricingPageUrl
-        if total > 0
-            suggestion = <span>Your {total} members-only hosting {misc.plural(total,'upgrade')} are already in use on other projects.  You can <a href={url} target='_blank' style={cursor:'pointer'}>purchase further upgrades </a> by adding a subscription (you can add the same subscription multiple times), or disable member-only hosting for another project to free a spot up for this one.</span>
-        else
-            suggestion = <span><Space /><a href={url} target='_blank' style={cursor:'pointer'}>Subscriptions start at only $7/month.</a></span>
-
-    <Alert bsStyle='warning' style={marginTop:'10px'}>
-        <h4><Icon name='exclamation-triangle'/>  Warning: this project is <strong>running on a free server</strong></h4>
-        <p>
-            Projects running on free servers compete for resources with a large number of other free projects.
-            The free servers are <b><i>randomly rebooted frequently</i></b>,
-            and are often <b><i>much more heavily loaded</i></b> than members-only servers.
-            {suggestion}
-        </p>
-    </Alert>
-
-exports.NoNetworkProjectWarning = (opts) ->
-    {total, used, avail} = project_warning_opts(opts)
-    if avail > 0
-        # have upgrade available
-        suggestion = <span><b><i>You have {avail} unused internet access {misc.plural(avail,'upgrade')}</i></b>.  Click 'Adjust your quotas...' below.</span>
-    else if avail <= 0
-        url = PolicyPricingPageUrl
-        if total > 0
-            suggestion = <span>Your {total} internet access {misc.plural(total,'upgrade')} are already in use on other projects.  You can <a href={url} target='_blank' style={cursor:'pointer'}>purchase further upgrades </a> by adding a subscription (you can add the same subscription multiple times), or disable an internet access upgrade for another project to free a spot up for this one.</span>
-        else
-            suggestion = <span><Space /><a href={url} target='_blank' style={cursor:'pointer'}>Subscriptions start at only $7/month.</a></span>
-
-    <Alert bsStyle='warning' style={marginTop:'10px'}>
-        <h4><Icon name='exclamation-triangle'/>  Warning: this project <strong>does not have full internet access</strong></h4>
-        <p>
-            Projects without internet access enabled, cannot connect to external websites or download software packages.
-            {suggestion}
-        </p>
-    </Alert>
-
 exports.LoginLink = rclass
     displayName : 'Misc-LoginLink'
 

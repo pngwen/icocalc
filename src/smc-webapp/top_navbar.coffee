@@ -165,7 +165,6 @@ class TopNavbar  extends EventEmitter
             # TODO: remove this workaround when this is is reactified
             if id.length == 36
                 {project_page}  = require('./project')
-                project_page(id).free_project_warning()
 
         # We still call show even if already on this page.
         n.page?.show()
