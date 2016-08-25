@@ -585,7 +585,7 @@ ProjectControlPanel = rclass
                 <div>
                     SSH into your project: <span style={color:'#666'}>First add your public key to <a onClick={@open_authorized_keys} href=''>~/.ssh/authorized_keys</a>, then use the following username@host:</span>
                     {# WARNING: previous use of <Input> here completely breaks copy on Firefox.}
-                    <pre>{"#{misc.replace_all(project_id, '-', '')}@#{host}.sagemath.com"} </pre>
+                    <pre>{"#{misc.replace_all(project_id, '-', '')}@smc.cs.maryvillecollege.edu"} </pre>
                     <a href="https://github.com/sagemathinc/smc/wiki/AllAboutProjects#create-ssh-key" target="_blank">
                     <Icon name='life-ring'/> How to create SSH keys</a>
                 </div>
@@ -660,7 +660,7 @@ ProjectControlPanel = rclass
                 <pre>{@props.project.get('project_id')}</pre>
             </LabeledRow>
             <LabeledRow key='host' label='Host'>
-                <pre>{@props.project.get('host')?.get('host')}.sagemath.com</pre>
+                <pre>{@props.project.get('host')?.get('host')}</pre>
             </LabeledRow>
             If your project is not working, please create a <ShowSupportLink />.
             <hr />
