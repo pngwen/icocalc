@@ -86,11 +86,6 @@ exports.load_target = load_target = (target) ->
                     top_navbar.switch_to_page("projects")
         when 'settings'
             top_navbar.switch_to_page("account")
-            if segments[1] == 'billing'
-                redux.getActions('billing').update_customer()
-                redux.getActions('account').setState(active_page : 'billing')
-            if segments[1] == 'upgrades'
-                redux.getActions('account').setState(active_page : 'upgrades')
 
 
 window.onpopstate = (event) ->

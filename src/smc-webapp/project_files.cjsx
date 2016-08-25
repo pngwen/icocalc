@@ -26,7 +26,6 @@ misc = require('smc-util/misc')
 {ActivityDisplay, DeletedProjectWarning, DirectoryInput, Icon, Loading, ProjectState, SAGE_LOGO_COLOR
  SearchInput, TimeAgo, ErrorDisplay, Space, Tip, LoginLink, Footer} = require('./r_misc')
 {FileTypeSelector, NewFileButton} = require('./project_new')
-{BillingPageLink}     = require('./billing')
 {human_readable_size} = require('./misc_page')
 {MiniTerminal}        = require('./project_miniterm')
 {file_associations}   = require('./editor')
@@ -1837,18 +1836,7 @@ ProjectFiles = (name) -> rclass
             activity = {underscore.values(@props.activity)}
             on_clear = {=>@props.actions.clear_all_activity()} />
 
-    render_course_payment_required: () ->
-        <Alert bsStyle='danger'>
-            <h4 style={padding: '2em'}>
-                <Icon name='exclamation-triangle'/> Error: Your instructor requires you to <BillingPageLink text='pay the course fee'/> for this project.
-            </h4>
-        </Alert>
 
-    render_course_payment_warning: (pay) ->
-        <Alert bsStyle='warning'>
-            <Icon name='exclamation-triangle'/> Warning: Your instructor requires you to <BillingPageLink text='pay the course fee'/> for this project
-            within <TimeAgo date={pay}/>.
-        </Alert>
 
     render_deleted: ->
         if @props.project_map?.getIn([@props.project_id, 'deleted'])
@@ -1878,7 +1866,7 @@ ProjectFiles = (name) -> rclass
                     # This shouldn't happen, but due to maybe a slight race condition in the backend it can.
                     e = <ErrorDisplay title="Project still not running" error={"The project was not running when this directory listing was requested.  Please try again in a moment."} />
                 when 'no_instance'
-                    e = <ErrorDisplay title="Host down" error={"The host for this project is down, being rebooted, or is overloaded with users.   Free projects are hosted on Google Pre-empt instances, which are rebooted at least once per day and periodically become unavailable.   To increase the robustness of your projects, please become a paying customer (US $7/month) by entering your credit card in the Billing tab next to account settings, then move your projects to a members only server."} />
+                    e = <ErrorDisplay title="Host down" error={"The host for this project is down, being rebooted, or is overloaded with users."}/>
                 else
                     e = <ErrorDisplay title="Directory listing error" error={error} />
             return <div>
@@ -1936,8 +1924,6 @@ ProjectFiles = (name) -> rclass
         projects_store = @props.redux.getStore('projects')  # component depends on this so OK
 
         pay = projects_store.date_when_course_payment_required(@props.project_id)
-        if pay? and pay <= salvus_client.server_time()
-            return @render_course_payment_required()
 
         # TODO: public_view is *NOT* a function of the props of this component. This is bad, but we're
         # going to do this temporarily so we can make a release.
@@ -1953,7 +1939,6 @@ ProjectFiles = (name) -> rclass
             {start_index, end_index} = pager_range(file_listing_page_size, @props.page_number)
             visible_listing = listing[start_index...end_index]
         <div style={minHeight:"80vh"}>
-            {if pay? then @render_course_payment_warning(pay)}
             {@render_deleted()}
             {@render_error()}
             {@render_activity()}

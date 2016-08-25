@@ -1001,11 +1001,6 @@ exports.CourseProjectWarning = (opts) ->
         return <span></span>
     # We may now assume course_info.get is defined, since course_warning is only true if it is.
     pay = course_info.get('pay')
-    billing = require('./billing')
-    if avail > 0
-        action = <billing.BillingPageLink text="move this project to a members only server" />
-    else
-        action = <billing.BillingPageLink text="buy a course subscription" />
     is_student = account_id == course_info.get('account_id') or email_address == course_info.get('email_address')
     if pay > salvus_client.server_time()  # in the future
         if is_student

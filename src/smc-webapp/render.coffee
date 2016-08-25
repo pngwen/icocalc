@@ -9,8 +9,6 @@ require('node-cjsx').transform()
 # Code for static server-side rendering of the subscription options.
 exports.render_subscriptions = ->
     ReactDOMServer = require('react-dom/server')
-    billing = require('./billing.cjsx')
     fs = require('fs')
-    html = ReactDOMServer.renderToString(billing.render_static_pricing_page())
     filename = '../webapp-lib/policies/_static_pricing_page.html'
-    fs.writeFileSync(filename, html)
+    fs.writeFileSync(filename)

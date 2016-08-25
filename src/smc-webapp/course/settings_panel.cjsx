@@ -315,9 +315,6 @@ exports.SettingsPanel = rclass
         upgrades = {}
         for quota, val of @state.upgrades
             val = misc.parse_number_input(val, round_number=false)
-            if val*num_projects != @_your_upgrades[quota]
-                display_factor = schema.PROJECT_UPGRADES.params[quota].display_factor
-                upgrades[quota] = val / display_factor
         @setState(upgrade_quotas: false)
         if misc.len(upgrades) > 0
             @props.redux.getActions(@props.name).upgrade_all_student_projects(upgrades)
@@ -328,23 +325,11 @@ exports.SettingsPanel = rclass
         num_projects = @_num_projects
         for quota, val of @state.upgrades
             val = misc.parse_number_input(val, round_number=false)
-            if val*num_projects != (@_your_upgrades[quota] ? 0)
-                changed = true
         return changed
 
     action_all_student_projects: (action) ->
         @props.redux.getActions(@props.name).action_all_student_projects(action)
 
-    render_upgrade_heading: (num_projects) ->
-        <Row key="heading">
-            <Col md=5>
-                <b style={fontSize:'11pt'}>Quota</b>
-            </Col>
-            {# <Col md=2><b style={fontSize:'11pt'}>Current upgrades</b></Col> }
-            <Col md=7>
-                <b style={fontSize:'11pt'}>Distribute your quotas equally between {num_projects} student {misc.plural(num_projects, 'project')} (amounts may be fractional)</b>
-            </Col>
-        </Row>
 
     is_upgrade_input_valid: (val, limit) ->
         parsed_val = misc.parse_number_input(val, round_number=false)

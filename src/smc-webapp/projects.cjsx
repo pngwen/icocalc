@@ -37,7 +37,6 @@ markdown = require('./markdown')
 {ErrorDisplay, Icon, Loading, LoginLink, ProjectState, Saving, Space, TimeAgo, Tip, UPGRADE_ERROR_STYLE, Footer, r_join} = require('./r_misc')
 {React, ReactDOM, Actions, Store, Table, redux, rtypes, rclass, Redux}  = require('./smc-react')
 {User} = require('./users')
-{BillingPageSimplifiedRedux} = require('./billing')
 {UpgradeAdjustorForUncreatedProject} = require('./project_settings')
 
 {PROJECT_UPGRADES} = require('smc-util/schema')
@@ -746,93 +745,6 @@ NewProjectCreator = rclass
     render_addon : (misc, name, display_unit, limit) ->
         <div style={minWidth:'81px'}>{"#{misc.plural(2,display_unit)}"} {@render_max_button(name, limit)}</div>
 
-    render_upgrade_row : (name, data, remaining=0, current=0, limit=0) ->
-        if not data?
-            return
-
-        {display, desc, display_factor, display_unit, input_type} = data
-
-        if input_type == 'checkbox'
-
-            # the remaining count should decrease if box is checked
-            show_remaining = remaining + current - @state["upgrade_#{name}"]
-            show_remaining = Math.max(show_remaining, 0)
-
-            val = @state["upgrade_#{name}"]
-
-            if not @is_upgrade_input_valid(val, limit)
-                label = <div style=UPGRADE_ERROR_STYLE>Uncheck this: you do not have enough upgrades</div>
-            else
-                label = if val == 0 then 'Enable' else 'Enabled'
-
-            <Row key={name}>
-                <Col sm=6>
-                    <Tip title={display} tip={desc}>
-                        <strong>{display}</strong><Space/>
-                    </Tip>
-                    ({show_remaining} {misc.plural(show_remaining, display_unit)} remaining)
-                </Col>
-                <Col sm=6>
-                    <form>
-                        <Input
-                            ref      = {"upgrade_#{name}"}
-                            type     = 'checkbox'
-                            checked  = {val > 0}
-                            label    = {label}
-                            onChange = {=>@setState("upgrade_#{name}" : if @refs["upgrade_#{name}"].getChecked() then 1 else 0)}
-                        />
-                    </form>
-                </Col>
-            </Row>
-
-
-        else if input_type == 'number'
-            remaining = misc.round2(remaining * display_factor)
-            display_current = current * display_factor # current already applied
-            if current != 0 and misc.round2(display_current) != 0
-                current = misc.round2(display_current)
-            else
-                current = display_current
-
-            limit = misc.round2(limit * display_factor)
-            current_input = misc.parse_number_input(@state["upgrade_#{name}"]) ? 0 # current typed in
-
-            # the amount displayed remaining subtracts off the amount you type in
-            show_remaining = misc.round2(remaining + current - current_input)
-
-            val = @state["upgrade_#{name}"]
-            if not @is_upgrade_input_valid(val, limit)
-                bs_style = 'error'
-                if misc.parse_number_input(val)?
-                    label = <div style=UPGRADE_ERROR_STYLE>Value too high: not enough upgrades or exceeding limit</div>
-                else
-                    label = <div style=UPGRADE_ERROR_STYLE>Please enter a number</div>
-            else
-                label = <span></span>
-
-            <Row key={name}>
-                <Col sm=6>
-                    <Tip title={display} tip={desc}>
-                        <strong>{display}</strong><Space/>
-                    </Tip>
-                    ({Math.max(show_remaining, 0)} {misc.plural(show_remaining, display_unit)} remaining)
-                </Col>
-                <Col sm=6>
-                    <Input
-                        ref        = {"upgrade_#{name}"}
-                        type       = 'text'
-                        value      = {val}
-                        bsStyle    = {bs_style}
-                        onChange   = {=>@setState("upgrade_#{name}" : @refs["upgrade_#{name}"].getValue())}
-                        addonAfter = {@render_addon(misc, name, display_unit, limit)}
-                    />
-                    {label}
-                </Col>
-            </Row>
-        else
-            console.warn('Invalid input type in render_upgrade_row: ', input_type)
-            return
-
     # Returns true if the inputs are valid and different:
     #    - at least one has changed
     #    - none are negative
@@ -856,61 +768,7 @@ NewProjectCreator = rclass
                 changed = true
         return changed
 
-    render_upgrades_adjustor : ->
-        if misc.is_zero_map(@props.upgrades_you_can_use)
-            # user has no upgrades on their account
-            <NoUpgrades cancel={@cancel_upgrading} />
-        else
-            limits = @get_quota_limits()
-            ordered_fields = PROJECT_UPGRADES.field_order
-            ordered_quota_params = {}
-            for name in ordered_fields
-                ordered_quota_params[name] = @props.quota_params[name]
-            <Alert bsStyle='info'>
-                <h3><Icon name='arrow-circle-up' /> Adjust your project quota contributions</h3>
-
-                <span style={color:"#666"}>Adjust <i>your</i> contributions to the quotas on this project (disk space, memory, cores, etc.).  The total quotas for this project are the sum of the contributions of all collaborators and the free base quotas.</span>
-                <hr/>
-                <Row>
-                    <Col md=6>
-                        <b style={fontSize:'12pt'}>Quota</b>
-                    </Col>
-                    <Col md=6>
-                        <b style={fontSize:'12pt'}>Your contribution</b>
-                        <br/>
-                        <Button
-                            bsSize  = 'xsmall'
-                            onClick = {=>@max_upgrades()}
-                            style   = {padding:'0px 5px'}
-                        >
-                            Max all upgrades
-                        </Button>
-                        {' '}
-                        <Button
-                            bsSize  = 'xsmall'
-                            onClick = {=>@reset_upgrades()}
-                            style   = {padding:'0px 5px'}
-                        >
-                            Reset all upgrades
-                        </Button>
-                    </Col>
-                </Row>
-                <hr/>
-
-                {@render_upgrade_row(n, data, limits.remaining[n], limits.current[n], limits.limits[n]) for n, data of ordered_quota_params}
-            </Alert>
-
-    render_upgrades_button : ->
-        <Row>
-            <Col sm=12>
-                <Button bsStyle='primary' onClick={@show_upgrade_quotas} style={float: 'right', marginBottom : '5px'}>
-                    <Icon name='arrow-circle-up' /> Adjust your quotas...
-                </Button>
-            </Col>
-        </Row>
-
     start_editing : ->
-        redux.getActions('billing')?.update_customer()
         @setState
             state           : 'edit'
             title_text      : ''
@@ -989,26 +847,6 @@ NewProjectCreator = rclass
         e.preventDefault();
         $('html, body').animate({ scrollTop: $('#upgrade_before_creation').offset().top }, 0)
 
-    render_upgrade_before_create : (subs) ->
-        <Col sm=12>
-            <h3>Upgrade to give your project internet access and more resources</h3>
-            <p>
-                To prevent abuse the free version doesn{"'"}t have internet access.
-                Installing software from the internet, using Github/Bitbucket/Gitlab/etc, and/or
-                any other internet resources
-                is not possible with the free version.
-                Starting at just $7/month you can give your project(s)
-                internet access, members only hosting, 1 day Idle timeout,
-                3 GB Memory, 5 GB Disk space, and half CPU share. You can share upgrades
-                with any project you are a collaborator on.
-            </p>
-            <div>
-                {<div id="upgrade_before_creation"></div> if subs == 0}
-                <BillingPageSimplifiedRedux redux={redux} />
-                {<div id="upgrade_before_creation"></div> if subs > 0}
-                {@render_upgrades_adjustor() if subs > 0}
-            </div>
-        </Col>
 
     render_no_title_alert : ->
         if @state.title_text == '' and @state.state != 'saving'
@@ -1093,9 +931,6 @@ NewProjectCreator = rclass
                         share with others and <a href="" onClick={@go_to_upgrade}>upgrade</a>.
                     </div>
                 </Col>
-            </Row>
-            <Row>
-                {@render_upgrade_before_create(subs)}
             </Row>
             <Row>
                 <Col sm=12>
@@ -1460,8 +1295,6 @@ ProjectSelector = rclass
             search            : rtypes.string
             selected_hashtags : rtypes.object
             show_all          : rtypes.bool
-        billing :
-            customer      : rtypes.object
 
     propTypes :
         redux             : rtypes.object

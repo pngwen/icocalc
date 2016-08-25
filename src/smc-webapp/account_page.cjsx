@@ -7,8 +7,6 @@ require('./redux_account')
 {Tab, Tabs, Grid} = require('react-bootstrap')
 {LandingPage} = require('./landing_page')
 {AccountSettingsTop} = require('./r_account')
-{BillingPageRedux} = require('./billing')
-{UpgradesPage} = require('./r_upgrades')
 {SupportPage}  = require('./support')
 {Icon} = require('./r_misc')
 browser = require('./browser')
@@ -56,18 +54,10 @@ AccountPage = rclass
 
     handle_select : (key) ->
         switch key
-            when 'billing'
-                @props.redux.getActions('billing')?.update_customer()
             when 'support'
                 @props.redux.getActions('support')?.load_support_tickets()
         @props.redux.getActions('account').setState(active_page: key)
         window.history.pushState('', '', window.smc_base_url + "/settings/#{key}")
-
-    render_upgrades : ->
-        <UpgradesPage
-            redux           = {@props.redux}
-            stripe_customer = {@props.stripe_customer}
-            project_map     = {@props.project_map} />
 
     render_support : ->
         <Redux redux={redux}>
@@ -118,12 +108,6 @@ AccountPage = rclass
             {<Tabs activeKey={@props.active_page} onSelect={@handle_select} animation={false} style={paddingTop: "1em"}>
                 <Tab eventKey="account" title={<span><Icon name='wrench'/> Account Settings</span>}>
                     {@render_account_settings()  if not @props.active_page? or @props.active_page == 'account'}
-                </Tab>
-                <Tab eventKey="billing" title={<span><Icon name='money'/> Billing</span>}>
-                    {<BillingPageRedux /> if @props.active_page == 'billing'}
-                </Tab>
-                <Tab eventKey="upgrades" title={<span><Icon name='arrow-circle-up'/> Upgrades</span>}>
-                    {@render_upgrades() if @props.active_page == 'upgrades'}
                 </Tab>
                 <Tab eventKey="support" title={<span><Icon name='medkit'/> Support</span>}>
                     {@render_support() if @props.active_page == 'support'}
