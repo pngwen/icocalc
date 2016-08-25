@@ -99,7 +99,7 @@ upgrades.params =
         input_type     : 'checkbox'
         desc           : 'Moves this project to a members-only server, which has less competition for resources.'
 
-upgrades.field_order = ['member_host', 'network', 'mintime', 'memory', 'disk_quota', 'cpu_shares', 'cores']
+upgrades.field_order = ['mintime', 'memory', 'disk_quota', 'cpu_shares', 'cores']
 
 # live_subscriptions is an array of arrays.  Each array should have length a divisor of 12.
 # The subscriptions will be displayed one row at a time.

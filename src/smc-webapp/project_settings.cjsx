@@ -152,24 +152,10 @@ QuotaConsole = rclass
         factor = params_data.display_factor
         unit   = params_data.display_unit
 
-        if upgrades?
-            upgrade_list = []
-            for id, val of upgrades
-                amount = misc.round2(val * factor)
-                li =
-                    <li key={id}>
-                        {amount} {misc.plural(amount, unit)} given by <User account_id={id} user_map={@props.user_map} />
-                    </li>
-                upgrade_list.push(li)
-
         amount = misc.round2(base_value * factor)
 
         <LabeledRow label={<Tip title={params_data.display} tip={params_data.desc}>{params_data.display}</Tip>} key={params_data.display}>
-            {if @state.editing then quota.edit else quota.view}
-            <ul style={color:'#666'}>
-                <li>{amount} {misc.plural(amount, unit)} given by free project</li>
-                {upgrade_list}
-            </ul>
+            {quota.view}
         </LabeledRow>
 
     start_admin_editing : ->
@@ -287,7 +273,8 @@ QuotaConsole = rclass
             # this happens for the admin -- just ignore any upgrades from the users
             total_quotas = {}
             for name, data of @props.quota_params
-                total_quotas[name] = settings.get(name)
+                if name is not "network" and name is not "member_host"
+                  total_quotas[name] = settings.get(name)
         disk_quota = <b>{settings.get('disk_quota')}</b>
         memory     = '?'
         disk       = '?'
@@ -319,12 +306,6 @@ QuotaConsole = rclass
             mintime     :
                 view : <span><b>{r(misc.round2(total_quotas['mintime'] * quota_params['mintime'].display_factor))} {misc.plural(total_quotas['mintime'] * quota_params['mintime'].display_factor, 'hour')}</b> of non-interactive use before project stops</span>
                 edit : <span><b>{@render_input('mintime')} hours</b> of non-interactive use before project stops</span>
-            network     :
-                view : <b>{if @props.project_settings.get('network') or total_quotas['network'] then 'Yes' else 'Blocked'}</b>
-                edit : @render_input('network')
-            member_host :
-                view : <b>{if @props.project_settings.get('member_host') or total_quotas['member_host'] then 'Yes' else 'No'}</b>
-                edit : @render_input('member_host')
 
         upgrades = @props.all_upgrades_to_this_project
 
@@ -360,7 +341,6 @@ UsagePanel = rclass
                 total_project_quotas         = {@props.total_project_quotas}
                 all_upgrades_to_this_project = {@props.all_upgrades_to_this_project}
                 actions                      = {@props.actions} />
-            <hr />
         </ProjectSettingsPanel>
 
 SharePanel = rclass
