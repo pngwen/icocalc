@@ -109,9 +109,6 @@ AccountPage = rclass
                 <Tab eventKey="account" title={<span><Icon name='wrench'/> Account Settings</span>}>
                     {@render_account_settings()  if not @props.active_page? or @props.active_page == 'account'}
                 </Tab>
-                <Tab eventKey="support" title={<span><Icon name='medkit'/> Support</span>}>
-                    {@render_support() if @props.active_page == 'support'}
-                </Tab>
             </Tabs> if logged_in}
         </Grid>
 
