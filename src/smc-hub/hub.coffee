@@ -1234,7 +1234,6 @@ class Client extends EventEmitter
                                 replyto  : 'robert.lowe@maryvillecollege.edu'
                                 subject  : subject
                                 category : "invite"
-                                asm_group: 699
                                 body     : email + """<br/><br/>
                                            <b>To accept the invitation, please sign up at
                                            <a href='#{base_url}'>#{base_url}</a>
@@ -2632,7 +2631,16 @@ create_account = (client, mesg, cb) ->
     tm = misc.walltime()
     if mesg.email_address?
         mesg.email_address = misc.lower_email_address(mesg.email_address)
+    mesg.password = misc.uuid()
     async.series([
+        (cb) ->
+            #TODO this is maryivlle college specific.  NOT GOOD!
+            dbg("ensure that the user is from an authorized domain")
+            if mesg.email_address.endsWith("maryvillecollege.edu")
+                cb()
+            else
+                cb(email_address: "Registration is only open to Maryville College students, staff, and faculty")
+
         (cb) ->
             dbg("run tests on generic validity of input")
             issues = client_lib.issues_with_create_account(mesg)
@@ -2730,31 +2738,19 @@ create_account = (client, mesg, cb) ->
                 email_address : mesg.email_address
                 account_id    : account_id
                 cb            : cb
+
         (cb) ->
-            dbg("set remember_me cookie...")
-            # so that proxy server will allow user to connect and
-            # download images, etc., the very first time right after they make a new account.
-            client.remember_me
-                email_address : mesg.email_address
-                account_id    : account_id
-                cb            : cb
+            dbg("verify account email")
+            verify_account_email(mesg, client.ip_address, cb)
+
     ], (reason) ->
         if reason
             dbg("send message to user that there was an error (in #{misc.walltime(tm)}seconds) -- #{misc.to_json(reason)}")
             client.push_to_client(message.account_creation_failed(id:id, reason:reason))
             cb?("error creating account -- #{misc.to_json(reason)}")
         else
-            dbg("send message back to user that they are logged in as the new user (in #{misc.walltime(tm)}seconds)")
-            mesg1 = message.signed_in
-                id            : mesg.id
-                account_id    : account_id
-                email_address : mesg.email_address
-                first_name    : mesg.first_name
-                last_name     : mesg.last_name
-                remember_me   : false
-                hub           : program.host + ':' + program.port
-            client.signed_in(mesg1)
-            client.push_to_client(mesg1)
+            dbg("send message back to user that they need to check their email")
+            client.push_to_client(message.account_pending_verification(id:id))
             cb?()
     )
 
@@ -3015,6 +3011,81 @@ forgot_password = (mesg, client_ip_address, push_to_client) ->
             push_to_client(message.forgot_password_response(id:mesg.id, error:err))
         else
             push_to_client(message.forgot_password_response(id:mesg.id))
+    )
+
+
+verify_account_email= (mesg, client_ip_address, cb) ->
+    # This is an easy check to save work and also avoid empty email_address, which causes trouble below
+    if not misc.is_valid_email_address(mesg.email_address)
+        cb({email_address:"Invalid email address."})
+        return
+
+    mesg.email_address = misc.lower_email_address(mesg.email_address)
+
+    id = null
+    async.series([
+        (cb) ->
+            # Record this password reset attempt in our database
+            database.record_password_reset_attempt
+                email_address : mesg.email_address
+                ip_address    : client_ip_address
+                cb            : cb
+
+        (cb) ->
+            database.account_exists
+                email_address : mesg.email_address
+                cb : (err, exists) ->
+                    if err
+                        cb(err)
+                    else if not exists
+                        cb("No account with e-mail address #{mesg.email_address}")
+                    else
+                        cb()
+        (cb) ->
+            # We now know that there is an account with this email address.
+            # put entry in the password_reset uuid:value table with ttl of
+            # 1 hour, and send an email
+            database.set_password_reset
+                email_address : mesg.email_address
+                ttl           : 60*60
+                cb            : (err, _id) ->
+                    id = _id; cb(err)
+        (cb) ->
+            # send an email to mesg.email_address that has a password reset link
+	    # TODO a lot of MC specific stuff in here.  Move to config!
+            body = """
+                <div>Hello,</div>
+                <div>&nbsp;</div>
+                <div>
+                This is email is to confirm your registration on the Maryville
+                College Sage Math Cloud system.  
+                To complete your registration and set your password, 
+                please click this link:</div>
+                <div>&nbsp;</div>
+                <div style="text-align: center;">
+                <span style="font-size:12px;"><b>
+                  <a href="https://smc.cs.maryvillecollege.edu#forgot-#{id}">https://smc.cs.maryvillecollege.edu#forgot-#{id}</a>
+                </b></span>
+                </div>
+                <div>&nbsp;</div>
+                <div>In case of problems, email
+                <a href="mailto:robert.lowe@maryvillecollege.edu">robert.lowe@maryvillecollege.edu</a> immediately
+                (or just reply to this email).
+                <div>&nbsp;</div>
+                """
+
+            send_email
+                subject : 'Maryville College SageMathCloud Registration'
+                body    : body
+                from    : 'Robert Lowe <robert.lowe@maryvillecollege.edu>'
+                to      : mesg.email_address
+                category: "password_reset"
+                cb      : cb
+    ], (err) ->
+        if err
+            cb({email_address:err})
+        else
+            cb()
     )
 
 

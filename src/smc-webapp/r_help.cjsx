@@ -131,10 +131,6 @@ HelpPageUsageSection = rclass
 
 
 SUPPORT_LINKS =
-    pricing :
-        icon : 'money'
-        href : PolicyPricingPageUrl
-        link : 'Pricing and subscription options'
     # commented out since link doesn't work
     #getting_started :
     #    icon : 'play'
@@ -203,11 +199,6 @@ SUPPORT_LINKS =
         icon : 'superscript'
         href : 'http://www.sagemath.org/help.html'
         link : 'General SageMath help and support pages'
-    chrome_app :
-        icon      : 'google'
-        href      : 'https://chrome.google.com/webstore/detail/the-sagemath-cloud/eocdndagganmilahaiclppjigemcinmb'
-        link      : 'Install the Chrome App'
-        className : 'salvus-chrome-only'
     user_survey :
         icon      : 'pencil-square'
         href      : 'https://docs.google.com/forms/d/1Odku9JuqYOVUHF4p5CXZ_Fl-7SIM3ApYexabfTV1O2o/viewform?usp=send_form'
@@ -491,12 +482,8 @@ exports.HelpPage = HelpPage = rclass
         <Row>
             <Col sm=10 smOffset=1 md=8 mdOffset=2 xs=12>
                 <div style={backgroundColor: 'white', padding: '15px', border: '1px solid lightgrey', borderRadius: '5px', margin:'auto', width:'100%', fontSize: '110%', textAlign: 'center'}>
-                    <Icon name='medkit'/><Space/><Space/>
-                    <strong>In case of any questions or problems, <em>do not hesitate</em> to create a <ShowSupportLink />.</strong>
-                    <br/>
-                    We want to know if anything is broken!
                     <hr/>
-                    <Icon name='envelope'/><Space/><Space/> You can also send an email to <HelpEmailLink />.
+                    <Icon name='envelope'/><Space/><Space/> If you encounter problems, please email <HelpEmailLink />.
                     <br/>
                     In such an email, please include the URL link to the relevant project or file.
                 </div>

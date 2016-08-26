@@ -3,6 +3,7 @@
 ###
 
 {Actions, Store, Table, redux}  = require('./smc-react')
+{alert_message} = require('./alerts')
 
 misc = require('smc-util/misc')
 
@@ -65,10 +66,9 @@ class AccountActions extends Actions
                 switch mesg.event
                     when "account_creation_failed"
                         @setState('sign_up_error': mesg.reason)
-                    when "signed_in"
-                        {analytics_event} = require('./misc_page')
-                        analytics_event('account', 'create_account') # user created an account
-                        require('./top_navbar').top_navbar.switch_to_page('projects')
+                    when "account_pending_verification"
+                        alert_message(type:"success", message: "Your account has been created.  Check your email to complete your regsitration.")
+                        @setState(pending_verification: true)
                     else
                         # should never ever happen
                         # alert_message(type:"error", message: "The server responded with invalid message to account creation request: #{JSON.stringify(mesg)}")

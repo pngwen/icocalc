@@ -259,6 +259,11 @@ message
 # client --> hub
 message
     id             : undefined
+    event          : 'account_pending_verification'
+
+# client --> hub
+message
+    id             : undefined
     event          : 'sign_in_failed'
     email_address  : required
     reason         : required

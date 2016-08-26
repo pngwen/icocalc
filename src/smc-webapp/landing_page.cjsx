@@ -79,13 +79,14 @@ SignUp = rclass
         token         : rtypes.bool
         has_account   : rtypes.bool
         signing_up    : rtypes.bool
+        pending_verification: rtypes.bool
         style         : rtypes.object
 
     make_account : (e) ->
         e.preventDefault()
         name     = @refs.name.getValue()
         email    = @refs.email.getValue()
-        password = @refs.password.getValue()
+        password = null
         token    = @refs.token?.getValue()
         @props.actions.create_account(name, email, password, token)
 
@@ -104,32 +105,36 @@ SignUp = rclass
             <Input ref='token' type='text' placeholder='Enter the secret token' />
 
     render : ->
-        <Well style={marginTop:'10px'}>
-            {@display_token_input()}
-            {@display_error("token")}
-            {@display_passports()}
-            <AccountCreationEmailInstructions />
-            <form style={marginTop: 20, marginBottom: 20} onSubmit={@make_account}>
-                {@display_error("first_name")}
-                <Input ref='name' type='text' autoFocus={false} placeholder='First and last Name' />
-                {@display_error("email_address")}
-                <Input ref='email' type='email' placeholder='Email address' />
-                {@display_error("password")}
-                <Input ref='password' type='password' placeholder='Choose a password' />
-                <TermsOfService style={fontSize: "small", textAlign: "center"} />
-                <Button style={marginBottom: UNIT, marginTop: UNIT}
-                    disabled={@props.signing_up}
-                    bsStyle="success"
-                    bsSize='large'
-                    type='submit'
-                    block>
-                        {<Icon name="spinner" spin /> if @props.signing_up} Sign up here!
-                    </Button>
-            </form>
-            <div style={textAlign: "center"}>
-                Email <HelpEmailLink /> if you need help.
-            </div>
-        </Well>
+        if @props.pending_verification
+            <Well style={marginTop:'10px'}>
+                Check your email to complete the registration process.
+            </Well>
+        else
+            <Well style={marginTop:'10px'}>
+                {@display_token_input()}
+                {@display_error("token")}
+                {@display_passports()}
+                <AccountCreationEmailInstructions />
+                <form style={marginTop: 20, marginBottom: 20} onSubmit={@make_account}>
+                    {@display_error("first_name")}
+                    <Input ref='name' type='text' autoFocus={false} placeholder='First and last Name' />
+                    {@display_error("email_address")}
+                    <Input ref='email' type='email' placeholder='Email address' />
+                    {@display_error("password")}
+                    <TermsOfService style={fontSize: "small", textAlign: "center"} />
+                    <Button style={marginBottom: UNIT, marginTop: UNIT}
+                        disabled={@props.signing_up}
+                        bsStyle="success"
+                        bsSize='large'
+                        type='submit'
+                        block>
+                            {<Icon name="spinner" spin /> if @props.signing_up} Sign up!
+                        </Button>
+                </form>
+                <div style={textAlign: "center"}>
+                    Email <HelpEmailLink /> if you need help.
+                </div>
+            </Well>
 
 SignIn = rclass
     displayName : "SignIn"
@@ -445,6 +450,7 @@ exports.LandingPage = rclass
         sign_in_error : rtypes.string
         signing_in : rtypes.bool
         signing_up : rtypes.bool
+        pending_verification: rtypes.bool
         forgot_password_error : rtypes.string
         forgot_password_success : rtypes.string #is this needed?
         show_forgot_password : rtypes.bool
@@ -529,6 +535,7 @@ exports.LandingPage = rclass
                                  strategies={@props.strategies}
                                  token={@props.token}
                                  signing_up={@props.signing_up}
+                                 verification_pending={@props.verficiation_pending}
                                  has_account={@props.has_account} />
                     </Col>
                 </Row>

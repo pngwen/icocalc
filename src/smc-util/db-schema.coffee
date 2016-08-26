@@ -778,7 +778,7 @@ exports.site_settings_conf =
     help_email:
         name    : "Help email address"
         desc    : "Email address that user is directed to use for support requests"
-        default : "help@sagemath.com"
+        default : "robert.lowe@maryvillecollege.edu"
 
 site_settings_fields = misc.keys(exports.site_settings_conf)
 
