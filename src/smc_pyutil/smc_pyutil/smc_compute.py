@@ -836,14 +836,14 @@ class Project(object):
             else:
                 # Full mode -- different users so we use ssh between different machines.
                 # However, in a cloud environment StrictHostKeyChecking is painful to manage.
-                w = ['-e', 'ssh -o StrictHostKeyChecking=no -p %s'%target_port,
+                w = ['-e', 'ssh -o StrictHostKeyChecking=no -lroot -p %s'%target_port,
                      src_abspath,
                      "%s:%s"%(target_hostname, target_abspath)]
             if exclude_history:
                 exclude = self._exclude('', extras=['*.sage-history'])
             else:
                 exclude = self._exclude('')
-            v = (['rsync'] + options +
+            v = (['sudo', 'rsync'] + options +
                      ['-zaxs',   # compressed, archive mode (so leave symlinks, etc.), don't cross filesystem boundaries
                       '--chown=%s:%s'%(u,u),
                       "--ignore-errors"] + exclude + w)
