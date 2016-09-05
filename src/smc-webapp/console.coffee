@@ -1036,5 +1036,6 @@ $.fn.extend
             else
                 opts0 = copy(opts)
                 opts0.element = this
+                opts0.cursorBlinkRate = 0
                 return t.data('console', new Console(opts0))
 
