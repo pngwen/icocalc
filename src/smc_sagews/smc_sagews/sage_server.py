@@ -19,7 +19,7 @@ For debugging, this may help:
 # used over a TCP connection.
 
 #########################################################################################
-#       Copyright (C) 2013 William Stein <wstein@gmail.com>                             #
+#       Copyright (C) 2016, Sagemath Inc.
 #                                                                                       #
 #  Distributed under the terms of the GNU General Public License (GPL), version 2+      #
 #                                                                                       #
@@ -43,10 +43,6 @@ MAX_STDOUT_SIZE = MAX_STDERR_SIZE = MAX_CODE_SIZE = MAX_HTML_SIZE = MAX_MD_SIZE 
 
 MAX_OUTPUT = 150000
 
-# We import the notebook interact, which we will monkey patch below,
-# first, since importing later causes trouble in sage>=5.6.
-import sagenb.notebook.interact
-
 # Standard imports.
 import json, resource, shutil, signal, socket, struct, \
        tempfile, time, traceback, pwd
@@ -55,20 +51,24 @@ import sage_parsing, sage_salvus
 
 uuid = sage_salvus.uuid
 
-try:
-    from sage.repl.attach import load_attach_path, modified_file_iterator
-    def reload_attached_files_if_mod_smc():
-        # see sage/src/sage/repl/attach.py reload_attached_files_if_modified()
-        for filename, mtime in modified_file_iterator():
-            basename = os.path.basename(filename)
-            timestr = time.strftime('%T', mtime)
-            print('### reloading attached file {0} modified at {1} ###'.format(basename, timestr))
-            from sage_salvus import load
-            load(filename)
-except:
-    print("sage_server: attach not available")
-    def reload_attached_files_if_mod_smc():
-        pass
+reload_attached_files_if_mod_smc_available = True
+def reload_attached_files_if_mod_smc():
+    global reload_attached_files_if_mod_smc_available
+    if not reload_attached_files_if_mod_smc_available:
+        return
+    try:
+        from sage.repl.attach import load_attach_path, modified_file_iterator
+    except:
+        print("sage_server: attach not available")
+        reload_attached_files_if_mod_smc_available = False
+        return
+    # see sage/src/sage/repl/attach.py reload_attached_files_if_modified()
+    for filename, mtime in modified_file_iterator():
+        basename = os.path.basename(filename)
+        timestr = time.strftime('%T', mtime)
+        print('### reloading attached file {0} modified at {1} ###'.format(basename, timestr))
+        from sage_salvus import load
+        load(filename)
 
 def unicode8(s):
     # I evidently don't understand Python unicode...  Do the following for now:
@@ -91,8 +91,8 @@ def log(*args):
         mesg = "%s (%s): %s\n"%(PID, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], ' '.join([unicode8(x) for x in args]))
         debug_log.write(mesg)
         debug_log.flush()
-    except:
-        log("an error writing a log message (ignoring)")
+    except Exception, err:
+        print("an error writing a log message (ignoring) -- %s"%err, args)
 
 # Determine the info object, if available.  There's no good reason
 # it wouldn't be available, unless a user explicitly deleted it, but
@@ -144,6 +144,8 @@ class ConnectionJSON(object):
 
     def send_json(self, m):
         m = json.dumps(m)
+        if '\\u0000' in m:
+            raise RuntimeError("NULL bytes not allowed")
         log(u"sending message '", truncate_text(m, 256), u"'")
         self._send('j' + m)
         return len(m)
@@ -394,7 +396,11 @@ class BufferedOutputStream(object):
         return 0
 
     def write(self, output):
-        self._buf += output
+        # CRITICAL: we need output to valid PostgreSQL TEXT, so no null bytes
+        # This is not going to silently corrupt anything -- it's just output that
+        # is destined to be *rendered* in the browser.  This is only a partial
+        # solution to a more general problem, but it is safe.
+        self._buf += output.replace('\x00','')
         #self.flush()
         t = time.time()
         if ((len(self._buf) >= self._flush_size) or
@@ -919,6 +925,14 @@ class Salvus(object):
 
     def execute(self, code, namespace=None, preparse=True, locals=None):
 
+        ascii_warn = False
+        code_error = False
+        if sys.getdefaultencoding() == 'ascii':
+            for c in code:
+                if ord(c) >= 128:
+                    ascii_warn = True
+                    break
+
         if namespace is None:
             namespace = self.namespace
 
@@ -933,6 +947,8 @@ class Salvus(object):
             import sage.repl.interpreter as sage_repl_interpreter
         except:
             log("Error - unable to import sage.repl.interpreter")
+
+        import sage.misc.session
 
         for start, stop, block in blocks:
             # if import sage.repl.interpreter fails, sag_repl_interpreter is unreferenced
@@ -954,15 +970,28 @@ class Salvus(object):
                     self.code(source = p['result'], mode = "text/x-rst")
                 else:
                     reload_attached_files_if_mod_smc()
+                    if execute.count < 2:
+                        execute.count += 1
+                        if execute.count == 2:
+                            # this fixup has to happen after first block has executed (os.chdir etc)
+                            # but before user assigns any variable in worksheet
+                            # sage.misc.session.init() is not called until first call of show_identifiers
+                            # BUGFIX: be careful to *NOT* assign to _!!  see https://github.com/sagemathinc/smc/issues/1107
+                            block2 = "sage.misc.session.state_at_init = dict(globals());sage.misc.session._dummy=sage.misc.session.show_identifiers();\n"
+                            exec compile(block2, '', 'single') in namespace, locals
                     exec compile(block+'\n', '', 'single') in namespace, locals
                 sys.stdout.flush()
                 sys.stderr.flush()
             except:
+                code_error = True
                 sys.stdout.flush()
                 sys.stderr.write('Error in lines %s-%s\n'%(start+1, stop+1))
                 traceback.print_exc()
                 sys.stderr.flush()
                 break
+        if code_error and ascii_warn:
+            sys.stderr.write('*** WARNING: Code contains non-ascii characters ***\n')
+            sys.stderr.flush()
 
     def execute_with_code_decorators(self, code_decorators, code, preparse=True, namespace=None, locals=None):
         """
@@ -1169,7 +1198,7 @@ class Salvus(object):
             m['placeholder'] = unicode8(placeholder)
         self._send_output(raw_input=m, id=self._id)
         typ, mesg = self.message_queue.next_mesg()
-        #log("raw_input got message typ='%s', mesg='%s'"%(typ, mesg))
+        log("handling raw input message ", truncate_text(unicode8(mesg), 400))
         if typ == 'json' and mesg['event'] == 'sage_raw_input':
             # everything worked out perfectly
             self.delete_last_output()
@@ -1289,7 +1318,6 @@ class Salvus(object):
             opts['use_cache'] = True
         import sage.misc.cython
         modname, path = sage.misc.cython.cython(filename, **opts)
-        import sys
         try:
             sys.path.insert(0,path)
             module = __import__(modname)
@@ -1304,7 +1332,6 @@ class Salvus(object):
                 break
         try:
             open(py_file_base+'.py', 'w').write(content)
-            import sys
             try:
                 sys.path.insert(0, os.path.abspath('.'))
                 mod = __import__(py_file_base)
@@ -1398,6 +1425,9 @@ def execute(conn, id, code, data, cell_id, preparse, message_queue):
         else:
             sys.stdout.flush(done=salvus._done)
         (sys.stdout, sys.stderr) = streams
+# execute.count goes from 0 to 2
+# used for show_identifiers()
+execute.count = 0
 
 
 def drop_privileges(id, home, transient, username):
@@ -1482,6 +1512,7 @@ def session(conn):
     import sage.misc.getusage
     sage.misc.getusage._proc_status = "/proc/%s/status"%os.getpid()
 
+
     cnt = 0
     while True:
         try:
@@ -1504,7 +1535,6 @@ def session(conn):
                 except Exception as err:
                     log("ERROR -- exception raised '%s' when executing '%s'"%(err, mesg['code']))
             elif event == 'introspect':
-                import sys
                 try:
                     # check for introspect from jupyter cell
                     prefix = Salvus._default_mode
@@ -1515,21 +1545,19 @@ def session(conn):
                             prefix = top[1:]
                     try:
                         # see if prefix is the name of a jupyter kernel function
-                        # to qualify, prefix should be the name of a function
-                        # and that function has free variables "i_am_a_jupyter_client" and "kn"
-                        jkfn = namespace[prefix]
-                        jupyter_client_index = jkfn.func_code.co_freevars.index("i_am_a_jupyter_client")
-                        jkix = jkfn.func_code.co_freevars.index("kn") # e.g. 3
-                        jkname = jkfn.func_closure[jkix].cell_contents # e.g. "python2"
-                        # consider also checking for jkname in list of jupyter kernels
-                        log("jupyter introspect %s: %s"%(prefix, jkname)) # e.g. "p2", "python2"
+                        kc = eval(prefix+"(get_kernel_client=True)",namespace,locals())
+                        kn = eval(prefix+"(get_kernel_name=True)",namespace,locals())
+                        log("jupyter introspect prefix %s kernel %s"%(prefix, kn)) # e.g. "p2", "python2"
                         jupyter_introspect(conn=conn,
                                            id=mesg['id'],
                                            line=mesg['line'],
                                            preparse=mesg.get('preparse', True),
-                                           jkfn=jkfn)
+                                           kc=kc)
                     except:
-                        # non-jupyter introspection
+                        import traceback
+                        exc_type, exc_value, exc_traceback = sys.exc_info()
+                        lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+                        log(lines)
                         introspect(conn=conn, id=mesg['id'], line=mesg['line'], preparse=mesg.get('preparse', True))
                 except:
                     pass
@@ -1547,14 +1575,12 @@ def session(conn):
             else:
                 pass
 
-def jupyter_introspect(conn, id, line, preparse, jkfn):
+def jupyter_introspect(conn, id, line, preparse, kc):
     import jupyter_client
     from Queue import Empty
 
     try:
         salvus = Salvus(conn=conn, id=id)
-        kcix = jkfn.func_code.co_freevars.index("kc")
-        kc = jkfn.func_closure[kcix].cell_contents
         msg_id = kc.complete(line)
         shell = kc.shell_channel
         iopub = kc.iopub_channel
@@ -1765,13 +1791,14 @@ def serve(port, host, extra_imports=False):
 
         namespace['_salvus_parsing'] = sage_parsing
 
-        for name in ['coffeescript', 'javascript', 'time', 'timeit', 'capture', 'cython',
-                     'script', 'python', 'python3', 'perl', 'ruby', 'sh', 'prun', 'show', 'auto',
-                     'hide', 'hideall', 'cell', 'fork', 'exercise', 'dynamic', 'var','jupyter',
-                     'reset', 'restore', 'md', 'load', 'attach', 'runfile', 'typeset_mode', 'default_mode',
-                     'sage_chat', 'fortran', 'modes', 'go', 'julia', 'pandoc', 'wiki', 'plot3d_using_matplotlib',
-                     'mediawiki', 'help', 'raw_input', 'clear', 'delete_last_output', 'sage_eval',
-                     'search_doc','search_src', 'license']:
+        for name in ['attach', 'auto', 'capture', 'cell', 'clear', 'coffeescript', 'cython',
+                     'default_mode', 'delete_last_output', 'dynamic', 'exercise', 'fork',
+                     'fortran', 'go', 'help', 'hide', 'hideall', 'input', 'java', 'javascript', 'julia',
+                     'jupyter', 'license', 'load', 'md', 'mediawiki', 'modes', 'octave', 'pandoc',
+                     'perl', 'plot3d_using_matplotlib', 'prun', 'python', 'python3', 'r', 'raw_input',
+                     'reset', 'restore', 'ruby', 'runfile', 'sage_chat', 'sage_eval', 'scala', 'scala211',
+                     'script', 'search_doc', 'search_src', 'sh', 'show', 'show_identifiers', 'singular_kernel',
+                     'time', 'timeit', 'typeset_mode', 'var', 'wiki']:
             namespace[name] = getattr(sage_salvus, name)
 
         namespace['sage_server'] = sys.modules[__name__]    # http://stackoverflow.com/questions/1676835/python-how-do-i-get-a-reference-to-a-module-inside-the-module-itself
@@ -1835,7 +1862,7 @@ def serve(port, host, extra_imports=False):
         # end while
     except Exception as err:
         log("Error taking connection: ", err)
-        traceback.print_exc(file=sys.stdout)
+        traceback.print_exc(file=open(LOGFILE, 'a'))
         #log.error("error: %s %s", type(err), str(err))
 
     finally:

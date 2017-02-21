@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2014, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -26,14 +26,18 @@
 #
 ###########################################
 
-{EventEmitter} = require('events')
-{alert_message} = require('./alerts')
-misc = require('smc-util/misc')
-{copy, filename_extension, required, defaults, to_json, uuid, from_json} = require('smc-util/misc')
-{redux} = require('./smc-react')
-{alert_message} = require('./alerts')
+$                = window.$
 
-misc_page = require('./misc_page')
+{debounce}       = require('underscore')
+
+{EventEmitter}   = require('events')
+{alert_message}  = require('./alerts')
+misc             = require('smc-util/misc')
+{copy, filename_extension, required, defaults, to_json, uuid, from_json} = require('smc-util/misc')
+{redux}          = require('./smc-react')
+{alert_message}  = require('./alerts')
+
+misc_page        = require('./misc_page')
 
 templates        = $("#salvus-console-templates")
 console_template = templates.find(".salvus-console")
@@ -44,8 +48,8 @@ IS_MOBILE = feature.IS_MOBILE
 
 CSI = String.fromCharCode(0x9b)
 
-initfile_content = (fn) ->
-    """# This initialization file is associated with your terminal in #{fn}.
+initfile_content = (filename) ->
+    """# This initialization file is associated with your terminal in #{filename}.
 # It is automatically run whenever it starts up -- restart the terminal via Ctrl-d and Return-key.
 
 # Usually, your ~/.bashrc is executed and this behavior is emulated for completeness:
@@ -68,36 +72,6 @@ source ~/.bashrc
 #hello () { echo "hello world"; }
 """
 
-codemirror_renderer = (start, end) ->
-    terminal = @
-    if terminal.editor?
-        width = terminal.cols
-        e = terminal.editor
-
-        # Set the output text
-        y = start
-        out = ''
-        while y <= end
-            row = y + terminal.ydisp
-            ln = terminal.lines[row]
-            out += (ln[i][1] for i in [0...width]).join('') + '\n'
-            y++
-        e.replaceRange(out, {line:start+terminal.ydisp,ch:0}, {line:end+1+terminal.ydisp,ch:0})
-
-        # Render the cursor
-        cp1 = {line:terminal.y+terminal.ydisp, ch:terminal.x}
-        cp2 = {line:cp1.line, ch:cp1.ch+1}
-        if e.getRange(cp1, cp2).length == 0
-            e.replaceRange(" ", cp1, cp2)
-        if terminal.salvus_console.is_focused
-            e.markText(cp1, cp2, {className:'salvus-console-cursor-focus'})
-        else
-            e.markText(cp1, cp2, {className:'salvus-console-cursor-blur'})
-        e.scrollIntoView(cp1)
-
-        # showing an image
-        #e.addLineWidget(end+terminal.ydisp, $("<img width=50 src='http://vertramp.org/2012-10-12b.png'>")[0])
-
 focused_console = undefined
 client_keydown = (ev) ->
     focused_console?.client_keydown(ev)
@@ -107,38 +81,38 @@ class Console extends EventEmitter
     constructor: (opts={}) ->
         @opts = defaults opts,
             element     : required  # DOM (or jQuery) element that is replaced by this console.
+            project_id  : required
+            path        : required
             session     : undefined  # a console_session; use .set_session to set it later instead.
             title       : ""
             filename    : ""
             rows        : 16
             cols        : 80
-            resizable   : false
             editor      : undefined  # FileEditor instance -- needed for some actions, e.g., opening a file
             close       : undefined  # if defined, called when close button clicked.
             reconnect   : undefined  # if defined, opts.reconnect?() is called when session console wants to reconnect; this should call set_session.
 
-            font        :   # only for 'ttyjs' renderer
+            font        :
                 family : undefined
                 size   : undefined                           # CSS font-size in points
-                line_height : 115                            # CSS line-height percentage
+                line_height : 120                            # CSS line-height percentage
 
             highlight_mode : 'none'
-            renderer       : 'ttyjs'   # options -- 'auto' (best for device); 'codemirror' (mobile support--useless), 'ttyjs' (xterm-color!)
-            draggable      : false    # not very good/useful yet.
-
             color_scheme   : undefined
+            on_pause       : undefined # Called after pause_rendering is called
+            on_unpause     : undefined # Called after unpause_rendering is called
+            on_reconnecting: undefined
+            on_reconnected : undefined
+            set_title      : undefined
 
         @_init_default_settings()
 
-        @_project_actions = smc.redux.getProjectActions(@opts.editor?.editor.project_id)
+        @project_id = @opts.project_id
+        @path = @opts.path
 
-        if @opts.renderer == 'auto'
-            if IS_MOBILE
-                # NOT USED !! -- I stopped developing the codemirror-based version long ago; it just doesn't work.
-                # IGNORE.  DELETE.
-                @opts.renderer = 'codemirror'
-            else
-                @opts.renderer = 'ttyjs'
+        @mark_file_use = debounce(@mark_file_use, 3000)
+
+        @_project_actions = redux.getProjectActions(@project_id)
 
         # The is_focused variable keeps track of whether or not the
         # editor is focused.  This impacts the cursor, and also whether
@@ -161,8 +135,6 @@ class Console extends EventEmitter
         # this via certain escape codes.
         @set_title(@opts.title)
 
-        @set_filename(@opts.filename)
-
         # Create the new Terminal object -- this is defined in
         # static/term/term.js -- it's a nearly complete implementation of
         # the xterm protocol.
@@ -172,7 +144,6 @@ class Console extends EventEmitter
         @terminal = new Terminal
             cols: @opts.cols
             rows: @opts.rows
-
         @init_mesg()
 
         # The first time Terminal.bindKeys is called, it makes Terminal
@@ -190,22 +161,7 @@ class Console extends EventEmitter
         @terminal.on 'scroll', (top, rows) =>
             @set_scrollbar_to_term()
 
-        # this object (=@) is needed by the custom renderer, if it is used.
-        @terminal.salvus_console = @
-        that = @
-
-        # Select the renderer
-        switch @opts.renderer
-            when 'codemirror'
-                # NOTE: the codemirror renderer depends on the xterm one being defined...
-                @_init_ttyjs()
-                $(@terminal.element).hide()
-                @_init_codemirror()
-            when 'ttyjs'
-                @_init_ttyjs()
-                $(@terminal.element).show()
-            else
-                throw("Unknown renderer '#{@opts.renderer}'")
+        @_init_ttyjs()
 
         # Initialize buttons
         @_init_buttons()
@@ -220,8 +176,10 @@ class Console extends EventEmitter
         # Init pausing rendering when user clicks
         @_init_rendering_pause()
 
-        # Initialize fullscreen button -- DELETE THIS; there's a generic fullscreen now...
-        #@_init_fullscreen()
+        if not IS_MOBILE
+            @textarea.on 'blur', =>
+                if @_focusing?          # see comment in @focus.
+                    @_focus_hidden_textarea()
 
         # delete scroll buttons except on mobile
         if not IS_MOBILE
@@ -232,11 +190,11 @@ class Console extends EventEmitter
             @set_session(opts.session)
 
     append_to_value: (data) =>
-        # this @value is used for copy/paste of the session history.
+        # this @value is used for copy/paste of the session history and @value_orig for resize/refresh
+        @value_orig += data
         @value += data.replace(/\x1b\[.{1,5}m|\x1b\].*0;|\x1b\[.*~|\x1b\[?.*l/g,'')
 
     init_mesg: () =>
-        #console.log("init_mesg")
         @_ignore_mesg = false
         @terminal.on 'mesg', (mesg) =>
             if @_ignore_mesg or not @is_focused   # ignore messages when terminal not in focus (otherwise collaboration is confusing)
@@ -268,26 +226,38 @@ class Console extends EventEmitter
         if @session?
             # Don't allow set_session to be called multiple times, since both sessions could
             # display data at the same time.
-            console.log("BUG: set_session called after session already set -- ignoring")
+            console.warn("BUG: set_session called after session already set -- ignoring")
             return
+
         # Store the remote session, which is a connection to a HUB
         # that is in turn connected to a console_server:
         @session = session
 
         @_ignore_mesg = true
+        @_connected = true
+        @_needs_resize = true
 
         # Plug the remote session into the terminal.
-        # Output from the terminal to the remote pty: usually caused by the user typing,
-        # but can also be the result of a device attributes request, etc.
+        # data = output *from the local terminal* to the remote pty.
+        # This is usually caused by the user typing,
+        # but can also be the result of a device attributes request.
         @terminal.on 'data',  (data) =>
+            if not @_connected
+                # not connected, so first connect, then write the data.
+                @session.reconnect (err) =>
+                    if not err
+                        @session.write_data(data)
+                return
+
             @session.write_data(data)
 
             # In case nothing comes back soon, we reconnect -- maybe the session is dead?
-            # We wait 10x the ping time, so if connection is slow, this won't
+            # We wait 20x the ping time (or 10s), so if connection is slow, this won't
             # constantly reconnect, but it is very fast in case the connection is fast.
-            latency = smc.client.latency()
+            {salvus_client} = require('./salvus_client')
+            latency = salvus_client.latency()
             if latency?
-                delay = Math.min(4000, latency*10)
+                delay = Math.min(10000, latency*20)
                 setTimeout(@reconnect_if_no_recent_data, delay)
 
         # The terminal receives a 'set my title' message.
@@ -295,100 +265,106 @@ class Console extends EventEmitter
 
         @reset()
 
-        @resize_terminal () =>
+        # We resize the terminal first before replaying history, etc. so that it looks better,
+        # and also the terminal has initialized so it can show the history.
+        @resize_terminal()
+        @config_session()
 
-            # The remote server sends data back to us to display:
-            @session.on 'data',  (data) =>
-                #console.log("terminal got #{data.length} characters -- '#{data}'")
-                @_got_remote_data = new Date()
-                if @_rendering_is_paused
-                    @_render_buffer += data
-                else
-                    @render(data)
+    config_session: () =>
+        # The remote server sends data back to us to display:
+        @session.on 'data',  (data) =>
+            # console.log("terminal got #{data.length} characters -- '#{data}'")
+            @_got_remote_data = new Date()
+            if @_rendering_is_paused
+                @_render_buffer += data
+            else
+                @render(data)
 
-            @session.on 'reconnecting', () =>
-                #console.log('terminal: reconnecting')
-                @element.find(".salvus-console-terminal").css('opacity':'.5')
-                @element.find("a[href=#refresh]").addClass('btn-success').find(".fa").addClass('fa-spin')
-
-            @session.on 'reconnect', () =>
-                @_got_remote_data = new Date()
-                #console.log("terminal: reconnect")
-                @element.find(".salvus-console-terminal").css('opacity':'1')
-                @element.find("a[href=#refresh]").removeClass('btn-success').find(".fa").removeClass('fa-spin')
-                @_ignore_mesg = true
-                @value = ""
-                @reset()
+            if @_needs_resize
                 @resize()
-                if @session.init_history?
-                    #console.log("writing history")
-                    try
-                        @terminal.write(@session.init_history)
-                    catch e
-                        console.log(e)
-                    #console.log("recording history for copy/paste buffer")
-                    @append_to_value(@session.init_history)
 
-                # On first write we ignore any queued terminal attributes responses that result.
-                @terminal.queue = ''
-                @terminal.showCursor()
-                @_ignore_mesg = false
+        @session.on 'reconnecting', () =>
+            #console.log('terminal: reconnecting')
+            @_reconnecting = new Date()
+            @element.find(".salvus-console-terminal").css('opacity':'.5')
+            @element.find("a[href=\"#refresh\"]").addClass('btn-success').find(".fa").addClass('fa-spin')
 
-            # Initialize pinging the server to keep the console alive
-            #@_init_session_ping()
-
-            #console.log("session -- history='#{@session.init_history}'")
+        @session.on 'reconnect', () =>
+            delete @_reconnecting
+            partial_code = false
+            @_needs_resize = true  # causes a resize when we next get data.
+            @_connected = true
+            @_got_remote_data = new Date()
+            @element.find(".salvus-console-terminal").css('opacity':'1')
+            @element.find("a[href=\"#refresh\"]").removeClass('btn-success').find(".fa").removeClass('fa-spin')
+            @_ignore_mesg = true
+            @reset()
             if @session.init_history?
+                #console.log("writing history")
                 try
                     @terminal.write(@session.init_history)
                 catch e
                     console.log(e)
-                # On first write we ignore any queued terminal attributes responses that result.
-                @terminal.queue = ''
+                #console.log("recording history for copy/paste buffer")
                 @append_to_value(@session.init_history)
 
+            # On first write we ignore any queued terminal attributes responses that result.
+            @terminal.queue = ''
             @terminal.showCursor()
-            setTimeout((=> @resize()), 1)  # trigger resizing, after history did load
             @_ignore_mesg = false
 
+        @session.on 'close', () =>
+            @_connected = false
+
+        # Initialize pinging the server to keep the console alive
+        #@_init_session_ping()
+
+        if @session.init_history?
+            #console.log("session -- history.length='#{@session.init_history.length}'")
+            try
+                @terminal.write(@session.init_history)
+            catch e
+                console.log(e)
+            # On first write we ignore any queued terminal attributes responses that result.
+            @terminal.queue = ''
+            @append_to_value(@session.init_history)
+
+        @terminal.showCursor()
+        @_ignore_mesg = false
+        @resize()
+
     render: (data) =>
+        #console.log "render '#{data}'"
         if not data?
             return
         try
             @terminal.write(data)
-            if @value == ""
-                #console.log("empty value")
-                @resize()
             @append_to_value(data)
 
             if @scrollbar_nlines < @terminal.ybase
                 @update_scrollbar()
 
             setTimeout(@set_scrollbar_to_term, 10)
-
-            @activity_indicator()
+            # See https://github.com/sagemathinc/smc/issues/1301
+            #redux.getProjectActions(@project_id).flag_file_activity(@path)
         catch e
-            # TODO -- these are all basically bugs, I think...
+            # WARNING -- these are all basically bugs, I think...
             # That said, try/catching them is better than having
             # the whole terminal just be broken.
-            console.log("terminal error -- ",e)
-
-    activity_indicator: () =>
-        @opts.editor?.activity_indicator()
+            console.warn("terminal error -- ",e)
 
     reset: () =>
         # reset the terminal to clean; need to do this on connect or reconnect.
         #$(@terminal.element).css('opacity':'0.5').animate(opacity:1, duration:500)
-        @value = ''
+        @value = @value_orig = ''
         @scrollbar_nlines = 0
+        @scrollbar.empty()
         @terminal.reset()
 
     update_scrollbar: () =>
         while @scrollbar_nlines < @terminal.ybase
             @scrollbar.append($("<br>"))
             @scrollbar_nlines += 1
-        @resize_scrollbar()
-
 
     pause_rendering: (immediate) =>
         if @_rendering_is_paused
@@ -398,11 +374,12 @@ class Console extends EventEmitter
             @_render_buffer = ''
         f = () =>
             if @_rendering_is_paused
-                @element.find("a[href=#pause]").addClass('btn-success').find('i').addClass('fa-play').removeClass('fa-pause')
+                @element.find("a[href=\"#pause\"]").addClass('btn-success').find('i').addClass('fa-play').removeClass('fa-pause')
         if immediate
             f()
         else
             setTimeout(f, 500)
+        @opts.on_pause?()
 
     unpause_rendering: () =>
         if not @_rendering_is_paused
@@ -414,15 +391,23 @@ class Console extends EventEmitter
         # Do the actual rendering the next time around, so that the copy operation completes with the
         # current selection instead of the post-render empty version.
         setTimeout(f, 0)
-        @element.find("a[href=#pause]").removeClass('btn-success').find('i').addClass('fa-pause').removeClass('fa-play')
+        @element.find("a[href=\"#pause\"]").removeClass('btn-success').find('i').addClass('fa-pause').removeClass('fa-play')
+        @opts.on_unpause?()
 
     #######################################################################
     # Private Methods
     #######################################################################
 
+    _on_pause_button_clicked: (e) =>
+        if @_rendering_is_paused
+            @unpause_rendering()
+        else
+            @pause_rendering(true)
+        return false
+
     _init_rendering_pause: () =>
 
-        btn = @element.find("a[href=#pause]").click (e) =>
+        btn = @element.find("a[href=\"#pause\"]").click (e) =>
             if @_rendering_is_paused
                 @unpause_rendering()
             else
@@ -431,7 +416,8 @@ class Console extends EventEmitter
 
         e = @element.find(".salvus-console-terminal")
 
-        e.mousedown () => @pause_rendering(false)
+        e.mousedown () =>
+            @pause_rendering(false)
 
         e.mouseup () =>
             if not getSelection().toString()
@@ -442,7 +428,9 @@ class Console extends EventEmitter
                 # nothing in the terminal is selected
                 @unpause_rendering()
 
-        e.on('copy', @unpause_rendering)
+        e.on 'copy', =>
+            @unpause_rendering()
+            setTimeout(@focus, 0)  # must happen in next cycle or copy will not work due to loss of focus.
 
     _init_colors: () =>
         colors = Terminal.color_schemes[@opts.color_scheme].colors
@@ -461,8 +449,12 @@ class Console extends EventEmitter
         Terminal.colors[256] = Terminal.defaultColors.bg
         Terminal.colors[257] = Terminal.defaultColors.fg
 
+    mark_file_use: () =>
+        redux.getActions('file_use').mark_file(@project_id, @path, 'edit')
+
     client_keydown: (ev) =>
         #console.log("client_keydown", ev)
+        @mark_file_use()
         if ev.ctrlKey and ev.shiftKey
             switch ev.keyCode
                 when 190       # "control-shift->"
@@ -496,13 +488,12 @@ class Console extends EventEmitter
     _font_size_changed: () =>
         @opts.editor?.local_storage("font-size",@opts.font.size)
         $(@terminal.element).css('font-size':"#{@opts.font.size}px")
-        delete @_character_height
         @element.find(".salvus-console-font-indicator-size").text(@opts.font.size)
         @element.find(".salvus-console-font-indicator").stop().show().animate(opacity:1).fadeOut(duration:8000)
         @resize()
 
     _init_font_make_default: () =>
-        @element.find("a[href=#font-make-default]").click () =>
+        @element.find("a[href=\"#font-make-default\"]").click () =>
             redux.getTable('account').set(terminal:{font_size:@opts.font.size})
             return false
 
@@ -515,93 +506,34 @@ class Console extends EventEmitter
         if not @opts.font.family?
             @opts.font.family = settings?.font ? "monospace"
 
-    #_init_session_ping: () =>
-    #    @session.ping(@console_is_open)
-
-    _init_codemirror: () ->
-        that = @
-        @terminal.custom_renderer = codemirror_renderer
-        t = @textarea
-        editor = @terminal.editor = CodeMirror.fromTextArea t[0],
-            lineNumbers   : false
-            lineWrapping  : false
-            indentUnit    : 0  # seems to have no impact (not what I want...)
-            mode          : @opts.highlight_mode   # to turn off, can just use non-existent mode name
-
-        e = $(editor.getScrollerElement())
-        e.css('height', "#{@opts.rows+0.4}em")
-        e.css('background', '#fff')
-
-        editor.on('focus', that.focus)
-        editor.on('blur', that.blur)
-
-        # Hide codemirror's own cursor.
-        $(editor.getScrollerElement()).find('.CodeMirror-cursor').css('border', '0px')
-
-        # Hacks to workaround the "insane" way in which Android Chrome
-        # doesn't work:
-        # http://code.google.com/p/chromium/issues/detail?id=118639
-        if IS_MOBILE
-            handle_mobile_change = (ed, changeObj) ->
-                s = changeObj.text.join('\n')
-                if changeObj.origin == 'input' and s.length > 0
-                    if that._next_ctrl
-                        that._next_ctrl = false
-                        that.terminal.keyDown(keyCode:s[0].toUpperCase().charCodeAt(0), ctrlKey:true, shiftKey:false)
-                        s = s.slice(1)
-                        that.element.find(".salvus-console-control").removeClass('btn-warning').addClass('btn-info')
-
-                    if s.length > 0
-                        that.session.write_data(s)
-                    # relaceRange causes a hang if you type "ls[backspace]" right on load.
-                    # Thus we use markText instead.
-                    #ed.replaceRange("", changeObj.from, {line:changeObj.to.line, ch:changeObj.to.ch+1})
-                    ed.markText(changeObj.from, {line:changeObj.to.line, ch:changeObj.to.ch+1}, className:"hide")
-                if changeObj.next?
-                    handle_mobile_change(ed, changeObj.next)
-            editor.on('change', handle_mobile_change)
-
-            @mobile_keydown = (ev) =>
-                if ev.keyCode == 8
-                    @terminal.keyDown(ev)
-
     _init_ttyjs: () ->
-        # Create the terminal DOM objects -- only needed for this renderer
+        # Create the terminal DOM objects
         @terminal.open()
         # Give it our style; there is one in term.js (upstream), but it is named in a too-generic way.
         @terminal.element.className = "salvus-console-terminal"
-        @element.find(".salvus-console-terminal").replaceWith(@terminal.element)
         ter = $(@terminal.element)
+        @element.find(".salvus-console-terminal").replaceWith(ter)
 
         ter.css
             'font-family' : @opts.font.family + ", monospace"  # monospace fallback
             'font-size'   : "#{@opts.font.size}px"
             'line-height' : "#{@opts.font.line_height}%"
 
-        if @opts.resizable
-            @element.resizable(alsoResize:ter, handles: "sw,s,se").on('resize', @resize)
-
-        # Set the entire console to be draggable.
-        if @opts.draggable
-            @element.draggable(handle:@element.find('.salvus-console-title'))
-
         # Focus/blur handler.
         if IS_MOBILE  # so keyboard appears
-            if @opts.renderer == 'ttyjs'
-                @mobile_target = @element.find(".salvus-console-for-mobile").show()
-                @mobile_target.css('width', ter.css('width'))
-                @mobile_target.css('height', ter.css('height'))
-                @_click = (e) =>
-                    t = $(e.target)
-                    if t[0]==@mobile_target[0] or t.hasParent(@element).length > 0
-                        @focus()
-                    else
-                        @blur()
-                $(document).on 'click', @_click
+            @mobile_target = @element.find(".salvus-console-for-mobile").show()
+            @mobile_target.css('width', ter.css('width'))
+            @mobile_target.css('height', ter.css('height'))
+            @_click = (e) =>
+                t = $(e.target)
+                if t[0]==@mobile_target[0] or t.hasParent(@element).length > 0
+                    @focus()
+                else
+                    @blur()
+            $(document).on 'click', @_click
         else
             @_mousedown = (e) =>
-                t = $(e.target)
-                if t.hasParent(@element).length > 0
+                if $(e.target).hasParent(@element).length > 0
                     @focus()
                 else
                     @blur()
@@ -620,19 +552,22 @@ class Console extends EventEmitter
 
     # call this when deleting the terminal (removing it from DOM, etc.)
     remove: () =>
+        @session?.close()
+        delete @session
+        @_connected = false
         if @_mousedown?
-             $(document).off 'mousedown', @_mousedown
+             $(document).off('mousedown', @_mousedown)
         if @_mouseup?
-             $(document).off 'mouseup', @_mouseup
+             $(document).off('mouseup', @_mouseup)
         if @_click?
-             $(document).off 'click', @_click
+             $(document).off('click', @_click)
 
     _focus_hidden_textarea: () =>
         @textarea.focus()
 
     _init_fullscreen: () =>
-        fullscreen = @element.find("a[href=#fullscreen]")
-        exit_fullscreen = @element.find("a[href=#exit_fullscreen]")
+        fullscreen = @element.find("a[href=\"#fullscreen\"]")
+        exit_fullscreen = @element.find("a[href=\"#exit_fullscreen\"]")
         fullscreen.on 'click', () =>
             @fullscreen()
             exit_fullscreen.show()
@@ -649,23 +584,19 @@ class Console extends EventEmitter
 
         @element.find("a").tooltip(delay:{ show: 500, hide: 100 })
 
-        @element.find("a[href=#increase-font]").click () =>
+        @element.find("a[href=\"#increase-font\"]").click () =>
             @_increase_font_size()
             return false
 
-        @element.find("a[href=#decrease-font]").click () =>
+        @element.find("a[href=\"#decrease-font\"]").click () =>
             @_decrease_font_size()
             return false
 
-        @element.find("a[href=#close]").click () =>
-            @opts.close?()
-            return false
-
-        @element.find("a[href=#refresh]").click () =>
+        @element.find("a[href=\"#refresh\"]").click () =>
             @session?.reconnect()
             return false
 
-        @element.find("a[href=#paste]").click () =>
+        @element.find("a[href=\"#paste\"]").click () =>
             id = uuid()
             s = "<h2><i class='fa project-file-icon fa-terminal'></i> Terminal Copy and Paste</h2>Copy and paste in terminals works as usual: to copy, highlight text then press ctrl+c (or command+c); press ctrl+v (or command+v) to paste. <br><br><span class='lighten'>NOTE: When no text is highlighted, ctrl+c sends the usual interrupt signal.</span><br><hr>You can copy the terminal history from here:<br><br><textarea readonly style='font-family: monospace;cursor: auto;width: 97%' id='#{id}' rows=10></textarea>"
             bootbox.alert(s)
@@ -673,12 +604,12 @@ class Console extends EventEmitter
             elt.val(@value).scrollTop(elt[0].scrollHeight)
             return false
 
-        @element.find("a[href=#initfile]").click () =>
+        @element.find("a[href=\"#initfile\"]").click () =>
             initfn = misc.console_init_filename(@opts.filename)
             content = initfile_content(@opts.filename)
             {salvus_client} = require('./salvus_client')
             salvus_client.exec
-                project_id  : @opts.editor?.editor.project_id
+                project_id  : @project_id
                 command     : "test ! -r '#{initfn}' && echo '#{content}' > '#{initfn}'"
                 bash        : true
                 err_on_exit : false
@@ -687,6 +618,28 @@ class Console extends EventEmitter
                         alert_message(type:'error', message:"problem creating initfile: #{err}")
                     else
                         @_project_actions?.open_file(path:initfn, foreground:true)
+
+    open_copyable_history: () =>
+        id = uuid()
+        s = "<h2><i class='fa project-file-icon fa-terminal'></i> Terminal Copy and Paste</h2>Copy and paste in terminals works as usual: to copy, highlight text then press ctrl+c (or command+c); press ctrl+v (or command+v) to paste. <br><br><span class='lighten'>NOTE: When no text is highlighted, ctrl+c sends the usual interrupt signal.</span><br><hr>You can copy the terminal history from here:<br><br><textarea readonly style='font-family: monospace;cursor: auto;width: 97%' id='#{id}' rows=10></textarea>"
+        bootbox.alert(s)
+        elt = $("##{id}")
+        elt.val(@value).scrollTop(elt[0].scrollHeight)
+
+    open_init_file: ()  =>
+        initfn = misc.console_init_filename(@opts.filename)
+        content = initfile_content(@opts.filename)
+        {salvus_client} = require('./salvus_client')
+        salvus_client.exec
+            project_id  : @project_id
+            command     : "test ! -r '#{initfn}' && echo '#{content}' > '#{initfn}'"
+            bash        : true
+            err_on_exit : false
+            cb          : (err, output) =>
+                if err
+                    alert_message(type:'error', message:"problem creating initfile: #{err}")
+                else
+                    @_project_actions?.open_file(path:initfn, foreground:true)
 
     _init_input_line: () =>
         #if not IS_MOBILE
@@ -788,7 +741,9 @@ class Console extends EventEmitter
             pb.val('')
             @session?.write_data(data)
 
-        pb.on('paste', (() -> setTimeout(f,0)))
+        pb.on 'paste', =>
+            pb.val('')
+            setTimeout(f,0)
 
     #######################################################################
     # Public API
@@ -816,80 +771,77 @@ class Console extends EventEmitter
             bottom    : 1
 
         @resize()
-        @element.resizable('disable').css(opacity:1)
 
     # exit fullscreen mode
     exit_fullscreen: () =>
         for elt in [$(@terminal.element), @element]
             elt.css
                 position : 'relative'
-                top : 0<br
-                width: "100%"
-        @element.resizable('enable')
+                top      : 0
+                width    : "100%"
         @resize()
 
     refresh: () =>
-        if @opts.renderer != 'ttyjs'
-            # nothing implemented
-            return
         @terminal.refresh(0, @opts.rows-1)
-        @resize_scrollbar()
+        @terminal.showCursor()
 
 
     # Determine the current size (rows and columns) of the DOM
     # element for the editor, then resize the renderer and the
     # remote PTY.
     resize: () =>
-        if @opts.renderer != 'ttyjs'
-            # nothing implemented except in the ttyjs case
-            return
-
         if not @session?
             # don't bother if we don't even have a remote connection
-            # (todo: could queue this up to send)
+            # FUTURE: could queue this up to send
             return
 
-        @resize_terminal () =>
+        if not @_connected
+            return
 
-            # Resize the remote PTY
-            resize_code = (cols, rows) ->
-                # See http://invisible-island.net/xterm/ctlseqs/ctlseqs.txt
-                # CSI Ps ; Ps ; Ps t
-                # CSI[4];[height];[width]t
-                return CSI + "4;#{rows};#{cols}t"
-            @session.write_data(resize_code(@opts.cols, @opts.rows))
+        if not @value
+            # Critical that we wait to receive something before doing any sort of resize; otherwise,
+            # the terminal will get "corrupted" with control codes.
+            return
 
-            @resize_scrollbar()
+        @resize_terminal()
 
+        # Resize the remote PTY
+        resize_code = (cols, rows) ->
+            # See http://invisible-island.net/xterm/ctlseqs/ctlseqs.txt
+            # CSI Ps ; Ps ; Ps t
+            # CSI[4];[height];[width]t
+            return CSI + "4;#{rows};#{cols}t"
 
-            # Refresh depends on correct @opts being set!
-            @refresh()
+        # console.log 'connected: sending resize code'
+        @session.write_data(resize_code(@opts.cols, @opts.rows))
 
-    resize_terminal: (cb) =>
-        # make the terminal DOM element almost all of its likely recently resized parent
-        $(@terminal.element).css('width','99.5%')
+        @full_rerender()
 
-        # The code here and below (in _resize_terminal) may seem horrible, but welcome to browser
-        # DOM programming...
+        # Refresh depends on correct @opts being set!
+        @refresh()
 
+        @_needs_resize = false
+
+    full_rerender: =>
+        value = @value_orig
+        @reset()
+        @_ignore_mesg = true
+        @render(value)
+        @_ignore_mesg = false
+
+    resize_terminal: () =>
         # Determine size of container DOM.
-        # Determine the average width of a character by inserting 10 blank spaces,
+        # Determine the average width of a character by inserting 10 characters,
         # seeing how wide that is, and dividing by 10.  The result is typically not
         # an integer, which is why we have to use multiple characters.
-        @_c = $("<span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>").prependTo(@terminal.element)
-
-        # We have to do the actual calculation in the next render loop, since otherwise the terminal
-        # might not yet have resized, or the text we just inserted might not yet be visible.
-        setTimeout((()=>@_resize_terminal(cb)), 0)
-
-    _resize_terminal: (cb) =>
+        @_c = $("<span>Term-inal&nbsp;</span>").prependTo(@terminal.element)
         character_width = @_c.width()/10
         @_c.remove()
         elt = $(@terminal.element)
 
         # The above style trick for character width is not reliable for getting the height of each row.
         # For that we use the terminal itself, since it already has rows, and hopefully at least
-        # one has something in it (a div).
+        # one row has something in it (a div).
         #
         # The row height is in fact *NOT* constant -- it can vary by 1 (say) depending
         # on what is in the row.  So we compute the maximum line height, which is safe, so
@@ -902,15 +854,14 @@ class Console extends EventEmitter
 
         if character_width == 0 or row_height == 0
             # The editor must not yet be visible -- do nothing
-            cb?()
             return
 
         # Determine the number of columns from the width of a character, computed above.
         font_size = @opts.font.size
-        new_cols = Math.max(1,Math.floor(elt.width() / character_width))
+        new_cols = Math.max(1, Math.floor(elt.width() / character_width))
 
-        # Determine number of rows from the height of the row , as computed above.
-        new_rows = Math.max(1,Math.floor((elt.height()-10) / row_height))
+        # Determine number of rows from the height of the row, as computed above.
+        new_rows = Math.max(1, Math.floor(elt.height() / row_height))
 
         # Resize the renderer
         @terminal.resize(new_cols, new_rows)
@@ -918,18 +869,6 @@ class Console extends EventEmitter
         # Record new size
         @opts.cols = new_cols
         @opts.rows = new_rows
-        cb?()
-
-    resize_scrollbar: () =>
-        # render the scrollbar on the right
-        sb = @scrollbar
-        width = sb[0].offsetWidth - sb[0].clientWidth
-        if width == 0
-            return
-        elt = $(@terminal.element)
-        elt.width(@element.width() - width - 2)
-        sb.width(width+2)
-        sb.height(elt.height())
 
     set_scrollbar_to_term: () =>
         if @terminal.ybase == 0  # less than 1 page of text in buffer
@@ -961,64 +900,50 @@ class Console extends EventEmitter
             focused_console = undefined
 
         @is_focused = false
+
         if IS_MOBILE
             $(document).off('keydown', @mobile_keydown)
 
         try
             @terminal.blur()
         catch e
-            # TODO: probably should investigate term.js issues further(?)
+            # WARNING: probably should investigate term.js issues further(?)
             # ignore -- sometimes in some states the terminal code can raise an exception when explicitly blur-ing.
             # This would totally break the client, which is bad, so we catch is.
-        $(@terminal.element).removeClass('salvus-console-focus').addClass('salvus-console-blur')
-        editor = @terminal.editor
-        if editor?
-            e = $(editor.getWrapperElement())
-            e.removeClass('salvus-console-focus').addClass('salvus-console-blur')
-            e.find(".salvus-console-cursor-focus").removeClass("salvus-console-cursor-focus").addClass("salvus-console-cursor-blur")
+        $(@terminal.element).addClass('salvus-console-blur').removeClass('salvus-console-focus')
 
     focus: (force) =>
+        if @_reconnecting? and new Date() - @_reconnecting > 10000
+            # reconnecting not working, so try again.  Also, this handles the case
+            # when terminal switched to reconnecting state, user closed computer, comes
+            # back later, etc. Without this, would not attempt to reconnect until
+            # user touches keys.
+            @reconnect_if_no_recent_data()
+
         if @is_focused and not force
             return
+
+        # focusing the term blurs the textarea, so we save that fact here,
+        # so that the textarea.on 'blur' knows why it just blured
+        @_focusing = true
+
         focused_console = @
         @is_focused = true
-
+        @textarea.blur()
         $(@terminal.element).focus()
-        if not @_character_height?
-            height = $(@terminal.element).height()
-            if height != 0 and @opts.rows?
-                @_character_height = Math.ceil(height / @opts.rows)
-
-        @resize()
 
         if IS_MOBILE
-            #$(document).on('keydown', @mobile_keydown)
             @element.find(".salvus-console-input-line").focus()
         else
-            @terminal.focus()
             @_focus_hidden_textarea()
+            @terminal.focus()
 
         $(@terminal.element).addClass('salvus-console-focus').removeClass('salvus-console-blur')
-        editor = @terminal.editor
-        if editor?
-            e = $(editor.getWrapperElement())
-            e.addClass('salvus-console-focus').removeClass('salvus-console-blur')
-            e.find(".salvus-console-cursor-blur").removeClass("salvus-console-cursor-blur").addClass("salvus-console-cursor-focus")
-
-        # Auto-defocus when not visible for 100ms.  Defocusing the
-        # console when not in view is CRITICAL, since it steals the
-        # keyboard completely.
-        check_for_hide = () =>
-            if not @element.is(":visible")
-                clearInterval(timer)
-                @blur()
-        timer = setInterval(check_for_hide, 100)
+        setTimeout((()=>delete @_focusing), 0)   # critical!
 
     set_title: (title) ->
+        @opts.set_title?(title)
         @element.find(".salvus-console-title").text(title)
-
-    set_filename: (filename) ->
-        @element.find(".salvus-console-filename").text(filename)
 
 
 exports.Console = Console

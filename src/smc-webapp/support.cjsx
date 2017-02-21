@@ -18,18 +18,17 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 ###############################################################################
-
+$          = window.$
 underscore = _ = require('underscore')
-{React, ReactDOM, Actions, Store, rtypes, rclass, Redux, redux, COLOR}  = require('./smc-react')
-{Col, Row, Button, Input, Well, Alert, Modal, Table} = require('react-bootstrap')
+{React, ReactDOM, Actions, Store, rtypes, rclass, redux, COLOR}  = require('./smc-react')
+{Col, Row, Button, FormControl, FormGroup, Well, Alert, Modal, Table} = require('react-bootstrap')
 {Icon, Markdown, Loading, SearchInput, Space, ImmutablePureRenderMixin, Footer} = require('./r_misc')
 misc            = require('smc-util/misc')
 misc_page       = require('./misc_page')
-{top_navbar}    = require('./top_navbar')
 {salvus_client} = require('./salvus_client')
 feature         = require('./feature')
 {markdown_to_html} = require('./markdown')
-{HelpEmailLink, SiteName} = require('./customize')
+{HelpEmailLink, SiteName, SmcWikiUrl} = require('./customize')
 
 STATE =
     NEW        : 'new'      # new/default/resetted/no problem
@@ -75,7 +74,7 @@ class SupportActions extends Actions
         if u.intersection(u.keys(update), fields).length > 0
             @check_valid()
 
-    load_support_tickets : () ->
+    load_support_tickets: () ->
         salvus_client.get_support_tickets (err, tickets) =>
             # console.log("tickets: #{misc.to_json(tickets)}")
             # sort by .updated_at
@@ -129,23 +128,23 @@ class SupportActions extends Actions
         # console.log("support/actions/check_valid: #{v} (s: #{s}, b: #{b}, e: #{e})")
         @set(valid: v)
 
-    project_id : ->
-        pid = top_navbar.current_page_id
+    project_id: ->
+        pid = @redux.getStore('page').get('active_top_tab')
         if misc.is_valid_uuid_string(pid)
             return pid
         else
             return null
 
-    projects : =>
+    projects: =>
         @redux.getStore("projects")
 
-    project_title : ->
+    project_title: ->
         if @project_id()?
             return @projects().get_title(@project_id())
         else
             return null
 
-    location : ->
+    location: ->
         window.location.pathname.slice(window.smc_base_url.length)
 
     # sends off the support request
@@ -188,7 +187,7 @@ class SupportActions extends Actions
         info =  # additional data dict, like browser/OS
             project_id : project_id
             browser    : feature.get_browser()
-            user_agent : navigator.userAgent
+            user_agent : navigator?.userAgent
             mobile     : feature.get_mobile() ? false
             internet   : (quotas?.network ? 0) > 0
             hostname   : project?.host?.host ? 'unknown'
@@ -229,18 +228,18 @@ exports.SupportPage = rclass
             support_tickets      : rtypes.array
             support_ticket_error : rtypes.string
 
-    render_header : ->
+    render_header: ->
         <tr style={fontWeight:"bold"}>
             <th>Ticket</th>
             <th>Status</th>
         </tr>
 
-    open : (ticket_id) ->
+    open: (ticket_id) ->
         url = misc.ticket_id_to_ticket_url(ticket_id)
         tab = window.open(url, '_blank')
         tab.focus()
 
-    render_body : ->
+    render_body: ->
         for i, ticket of @props.support_tickets
             style = switch ticket.status
                 when 'open', 'new'
@@ -273,7 +272,7 @@ exports.SupportPage = rclass
                 </td>
             </tr>
 
-    render_table : ->
+    render_table: ->
         divStyle = {textAlign:"center", marginTop: "4em"}
 
         if not @props.support_tickets?
@@ -291,7 +290,7 @@ exports.SupportPage = rclass
                 No support tickets found.
             </div>
 
-    render : ->
+    render: ->
         if @props.support_ticket_error?.length > 0
             content = <Alert bsStyle='danger'>
                           Error retriving tickets: {@props.support_ticket_error}
@@ -323,7 +322,7 @@ SupportInfo = rclass
         url          : rtypes.string.isRequired
         err          : rtypes.string.isRequired
 
-    error : () ->
+    error: () ->
         <Alert bsStyle='danger' style={fontWeight:'bold'}>
             <p>
             Sorry, there has been an error creating the ticket.
@@ -334,7 +333,7 @@ SupportInfo = rclass
             <pre>{@props.err}</pre>
         </Alert>
 
-    created : () ->
+    created: () ->
         if @props.url?.length > 1
             url = <a href={@props.url} target='_blank'>{@props.url}</a>
         else
@@ -352,7 +351,7 @@ SupportInfo = rclass
               onClick  = {@props.actions.new_ticket}>Create New Ticket</Button>
        </div>
 
-    default : () ->
+    default: () ->
         title = @props.actions.project_title()
         if title?
             loc  = @props.actions.location()
@@ -372,6 +371,10 @@ SupportInfo = rclass
         <div>
             {what}
             <p>
+                Looking for documentation and help? Go to
+                the <a href="#{SmcWikiUrl}" target="_blank">SageMathCloud documentation</a>.
+            </p>
+            <p>
                 After submitting a ticket, you{"'"}ll get a link, which you may
                 want to save until you receive a confirmation email.
                 You can also check the status of your ticket under "Support"
@@ -379,7 +382,7 @@ SupportInfo = rclass
             </p>
         </div>
 
-    render : ->
+    render: ->
         switch @props.state
             when STATE.ERROR
                 return @error()
@@ -399,7 +402,7 @@ SupportFooter = rclass
         show_form: rtypes.bool.isRequired
         valid    : rtypes.bool.isRequired
 
-    render : ->
+    render: ->
         if @props.show_form
             btn = <Button bsStyle  = 'primary'
                           tabIndex = 4
@@ -411,11 +414,11 @@ SupportFooter = rclass
             btn = <span/>
 
         <Modal.Footer>
+            {btn}
             <Button
                 tabIndex  = 5
                 bsStyle   ='default'
-                onClick   = {@props.close}>Close</Button>
-            {btn}
+                onClick   = {@props.close}>Cancel</Button>
         </Modal.Footer>
 
 SupportForm = rclass
@@ -430,15 +433,15 @@ SupportForm = rclass
         submit    : rtypes.func.isRequired
         actions   : rtypes.object.isRequired
 
-    email_change  : ->
-        @props.actions.set_email(@refs.email.getValue())
+    email_change: ->
+        @props.actions.set_email(ReactDOM.findDOMNode(@refs.email).value)
 
-    data_change : ->
+    data_change: ->
         @props.actions.set
-            body     : @refs.body.getValue()
-            subject  : @refs.subject.getValue()
+            body     : ReactDOM.findDOMNode(@refs.body).value
+            subject  : ReactDOM.findDOMNode(@refs.subject).value
 
-    render : ->
+    render: ->
         if not @props.show
             return <div />
 
@@ -453,44 +456,52 @@ SupportForm = rclass
             </Alert>
 
         <form>
-            <Input
-                label       = 'Your email address'
-                ref         = 'email'
-                type        = 'text'
-                tabIndex    = 1
-                placeholder = 'your_email@address.com'
-                validationState = {if ee?.length > 0 then 'error'}
-                value       = {@props.email}
-                onChange    = {@email_change} />
+            <FormGroup validationState={if ee?.length > 0 then 'error'}>
+                <FormControl
+                    label       = 'Your email address'
+                    ref         = 'email'
+                    type        = 'text'
+                    tabIndex    = 1
+                    placeholder = 'your_email@address.com'
+                    value       = {@props.email}
+                    onChange    = {@email_change} />
+            </FormGroup>
             {email_info}
             <Space />
-            <Input
-                ref         = 'subject'
-                autoFocus
-                type        = 'text'
-                tabIndex    = 2
-                label       = 'Message'
-                placeholder = "Subject ..."
-                value       = {@props.subject}
-                onChange    = {@data_change} />
-            <Input
-                ref         = 'body'
-                type        = 'textarea'
-                tabIndex    = 3
-                placeholder = 'Describe the problem ...'
-                rows        = 6
-                value       = {@props.body}
-                onChange    = {@data_change} />
+            <FormGroup>
+                <FormControl
+                    ref         = 'subject'
+                    autoFocus
+                    type        = 'text'
+                    tabIndex    = 2
+                    label       = 'Message'
+                    placeholder = "Subject ..."
+                    value       = {@props.subject}
+                    onChange    = {@data_change} />
+            </FormGroup>
+            <div style={margin:'10px', color:'#666'}>
+                1. What did you do exactly?  2. What happened?  3. How did this differ from what you expected?
+            </div>
+            <FormGroup>
+                <FormControl
+                    componentClass = "textarea"
+                    ref         = 'body'
+                    tabIndex    = 3
+                    placeholder = 'Describe the problem ...'
+                    rows        = 6
+                    value       = {@props.body}
+                    onChange    = {@data_change} />
+            </FormGroup>
         </form>
 
 
-Support = rclass
+exports.Support = rclass
     displayName : 'Support-main'
 
     propTypes :
         actions : rtypes.object.isRequired
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         show        : false
         email       : ''
         subject     : ''
@@ -513,20 +524,20 @@ Support = rclass
             email_err    : rtypes.string
             valid        : rtypes.bool
 
-    componentWillReceiveProps : (newProps) ->
+    componentWillReceiveProps: (newProps) ->
         newProps.actions.check_valid()
 
-    open : ->
+    open: ->
         @props.actions.show(true)
 
-    close : ->
+    close: ->
         @props.actions.show(false)
 
-    submit : (event) ->
+    submit: (event) ->
         event?.preventDefault()
         @props.actions.support()
 
-    render : () ->
+    render: () ->
         show_form = false
 
         if (not @props.state?) or @props.state == STATE.NEW
@@ -560,20 +571,6 @@ Support = rclass
                     valid           = {@props.valid} />
         </Modal>
 
-render = (redux) ->
-    store   = redux.getStore('support')
-    actions = redux.getActions('support')
-
-    <Redux redux={redux}>
-        <Support actions = {actions} />
-    </Redux>
-
-render_project_support = (dom_node, redux) ->
-    ReactDOM.render(render(redux), dom_node)
-
-unmount = unmount = (dom_node) ->
-    ReactDOM.unmountComponentAtNode(dom_node)
-
 init_redux = (redux) ->
     if not redux.getActions('support')?
         redux.createActions('support', SupportActions)
@@ -588,19 +585,14 @@ exports.ShowSupportLink = rclass
     propTypes :
         text : rtypes.string
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         text : 'support ticket'
 
     show: (evt) ->
         evt.preventDefault()
-        exports.show()
+        redux.getActions('support').show(true)
 
-    render : ->
-        <Redux redux={redux}>
-            <a onClick={@show} href='#' style={cursor: 'pointer'}>
-                {@props.text}
-            </a>
-        </Redux>
-
-exports.show = ->
-    redux.getActions('support').show(true)
+    render: ->
+        <a onClick={@show} href='#' style={cursor: 'pointer'}>
+            {@props.text}
+        </a>

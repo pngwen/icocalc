@@ -2,6 +2,8 @@
 # Account Redux store
 ###
 
+async = require('async')
+
 {Actions, Store, Table, redux}  = require('./smc-react')
 {alert_message} = require('./alerts')
 
@@ -18,7 +20,7 @@ class AccountActions extends Actions
     set_user_type: (user_type) ->
         @setState(user_type: user_type)
 
-    sign_in : (email, password) =>
+    sign_in: (email, password) =>
         @setState(signing_in: true)
         salvus_client.sign_in
             email_address : email
@@ -34,7 +36,7 @@ class AccountActions extends Actions
                     when 'sign_in_failed'
                         @setState(sign_in_error : mesg.reason)
                     when 'signed_in'
-                        require('./top_navbar').top_navbar.switch_to_page('projects')
+                        redux.getActions('page').set_active_tab('projects')
                         break
                     when 'error'
                         @setState(sign_in_error : mesg.reason)
@@ -42,7 +44,7 @@ class AccountActions extends Actions
                         # should never ever happen
                         @setState(sign_in_error : "The server responded with invalid message when signing in: #{JSON.stringify(mesg)}")
 
-    create_account : (name, email, password, token) ->
+    create_account: (name, email, password, token) ->
         i = name.lastIndexOf(' ')
         if i == -1
             last_name = ''
@@ -69,33 +71,50 @@ class AccountActions extends Actions
                     when "account_pending_verification"
                         alert_message(type:"success", message: "Your account has been created.  Check your email to complete your regsitration.")
                         @setState(pending_verification: true)
+                    when "signed_in"
+                        {analytics_event} = require('./misc_page')
+                        analytics_event('account', 'create_account') # user created an account
+                        redux.getActions('page').set_active_tab('projects')
                     else
                         # should never ever happen
                         # alert_message(type:"error", message: "The server responded with invalid message to account creation request: #{JSON.stringify(mesg)}")
 
     # deletes the account and then signs out everywhere
-    delete_account : ->
-        salvus_client.delete_account
-            account_id : @redux.getStore('account').get_account_id()
-            timeout       : 40
-            cb            : (err) =>
-                if err?
-                    @setState('account_deletion_error' : "Error trying to delete the account: #{err}")
-                else
-                    @sign_out(true)
+    delete_account: =>
+        async.series([
+            (cb) =>
+                # cancel any subscriptions
+                redux.getActions('billing').cancel_everything(cb)
+            (cb) =>
+                # actually request to delete the account
+                salvus_client.delete_account
+                    account_id : @redux.getStore('account').get_account_id()
+                    timeout       : 40
+                    cb            : cb
 
-    forgot_password : (email) ->
+        ], (err) =>
+            if err?
+                @setState('account_deletion_error' : "Error trying to delete the account: #{err}")
+            else
+                @sign_out(true)
+        )
+
+    forgot_password: (email) ->
         salvus_client.forgot_password
             email_address : email
             cb : (err, mesg) =>
+                if mesg?.error
+                    err = mesg.error
                 if err?
-                    @setState('forgot_password_error': "Error sending password reset message to #{email} (#{err}); write to #{help()} for help.")
-                else if mesg.err
-                    @setState('forgot_password_error': "Error sending password reset message to #{email} (#{err}); write to #{help()} for help.")
+                    @setState
+                        forgot_password_error   : "Error sending password reset message to #{email} -- #{err}. Write to #{help()} for help."
+                        forgot_password_success : ''
                 else
-                    @setState('forgot_password_success': "Password reset message sent to #{email}; if you don't receive it or have further trouble, write to #{help()}.")
+                    @setState
+                        forgot_password_success : "Password reset message sent to #{email}; if you don't receive it, check your spam folder; if you have further trouble, write to #{help()}."
+                        forgot_password_error   : ''
 
-    reset_password : (code, new_password) ->
+    reset_password: (code, new_password) ->
         salvus_client.reset_forgot_password
             reset_code   : code
             new_password : new_password
@@ -108,10 +127,11 @@ class AccountActions extends Actions
                     else
                         # success
                         # TODO: can we automatically log them in?
-                        history.pushState("", document.title, window.location.pathname)
+                        window.history.pushState("", document.title, window.location.pathname)
                         @setState(reset_key : '', reset_password_error : '')
-    sign_out : (everywhere) ->
-        delete localStorage[remember_me]
+
+    sign_out: (everywhere) ->
+        misc.delete_local_storage(remember_me)
         evt = 'sign_out'
         if everywhere
             evt += '_everywhere'
@@ -129,8 +149,22 @@ class AccountActions extends Actions
                 else
                     # Force a refresh, since otherwise there could be data
                     # left in the DOM, which could lead to a vulnerability
-                    # or blead into the next login somehow.
-                    window.location.reload(false)
+                    # or bleed into the next login somehow.
+                    $(window).off('beforeunload', redux.getActions('page').check_unload)
+                    window.location.hash = ''
+                    window.location = window.location.pathname.slice(0, -8) # remove settings hashtag so that on login the projects page shows instead of settings page
+
+    push_state: (url) =>
+        {set_url} = require('./history')
+        if not url?
+            url = @_last_history_state
+        if not url?
+            url = ''
+        @_last_history_state = url
+        set_url('/settings' + misc.encode_path(url))
+
+    set_active_tab: (tab) =>
+        @setState(active_page : tab)
 
 # Register account actions
 actions = redux.createActions('account', AccountActions)
@@ -147,8 +181,8 @@ class AccountStore extends Store
     get_account_id: =>
         return @get('account_id')
 
-    is_logged_in : =>
-        return @get('account_id')?
+    is_logged_in: =>
+        return @get_user_type() == 'signed_in'
 
     is_admin: =>
         return @get('groups').includes('admin')
@@ -192,7 +226,7 @@ class AccountStore extends Store
 # Register account store
 # Use the database defaults for all account info until this gets set after they login
 init = misc.deep_copy(require('smc-util/schema').SCHEMA.accounts.user_query.get.fields)
-init.user_type = if localStorage[remember_me]? then 'signing_in' else 'public'  # default
+init.user_type = if misc.get_local_storage(remember_me) then 'signing_in' else 'public'  # default
 redux.createStore('account', AccountStore, init)
 
 # Create and register account table, which gets automatically
@@ -214,8 +248,32 @@ salvus_client.on 'signed_out', ->
 salvus_client.on 'remember_me_failed', ->
     redux.getActions('account').set_user_type('public')
 
-# Standby timeout
+# Autosave interval
+_autosave_interval = undefined
+init_autosave = (autosave) ->
+    if _autosave_interval
+        # This function can safely be called again to *adjust* the
+        # autosave interval, in case user changes the settings.
+        clearInterval(_autosave_interval)
+        _autosave_interval = undefined
+
+    # Use the most recent autosave value.
+    if autosave
+        save_all_files = () ->
+            if salvus_client.is_connected()
+                redux.getActions('projects').save_all_files()
+        _autosave_interval = setInterval(save_all_files, autosave * 1000)
+
 account_store = redux.getStore('account')
+
+_last_autosave_interval_s = undefined
+account_store.on 'change', ->
+    interval_s = account_store.get('autosave')
+    if interval_s != _last_autosave_interval_s
+        _last_autosave_interval_s = interval_s
+        init_autosave(interval_s)
+
+# Standby timeout
 last_set_standby_timeout_m = undefined
 account_store.on 'change', ->
     # NOTE: we call this on any change to account settings, which is maybe too extreme.
@@ -223,3 +281,6 @@ account_store.on 'change', ->
     if last_set_standby_timeout_m != x
         last_set_standby_timeout_m = x
         salvus_client.set_standby_timeout_m(x)
+
+
+

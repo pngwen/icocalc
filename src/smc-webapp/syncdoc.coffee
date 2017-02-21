@@ -2,10 +2,10 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2014, 2015, 2016 William Stein
+#    Copyright (C) 2014 -- 2016, SageMath, Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU General Public License as published by
+#    it under the terms of the GNU Gener@al Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
 #
@@ -19,7 +19,7 @@
 #
 ###############################################################################
 
-
+$        = window.$
 misc     = require('smc-util/misc')
 {defaults, required} = misc
 
@@ -44,6 +44,8 @@ account = require('./account')
 
 {EventEmitter} = require('events')
 
+{IS_MOBILE} = require('./feature')
+
 class AbstractSynchronizedDoc extends EventEmitter
     file_path: () =>
         if not @_file_path?
@@ -58,7 +60,7 @@ exports.synchronized_string = synchronized_string
 class SynchronizedDocument extends AbstractSynchronizedDoc
     codemirrors: () =>
         v = [@codemirror]
-        if @editor._split_view
+        if @editor._layout > 0
             v.push(@codemirror1)
         return v
 
@@ -71,397 +73,6 @@ class SynchronizedDocument extends AbstractSynchronizedDoc
             n     : opts?.n
             delay : opts?.delay
             f     : @sync
-
-    ###
-    The rest of this class is chat functionality.  This will, of course, be factored out.
-    ###
-    init_chat: () =>
-        chat = @element.find(".salvus-editor-codemirror-chat")
-        input = chat.find(".salvus-editor-codemirror-chat-input")
-
-        # send chat message
-        input.keydown (evt) =>
-            if evt.which == 13 # enter
-                content = $.trim(input.val())
-                if content != ""
-                    input.val("")
-                    @write_chat_message
-                        event_type : "chat"
-                        payload    : {content : content}
-                return false
-
-        @chat_session.on('sync', (=>@render_chat_log()))
-
-        @render_chat_log()  # first time
-        @init_chat_toggle()
-        @init_video_toggle()
-        @new_chat_indicator(false)
-
-
-    # This is an interface that allows messages to be passed between connected
-    # clients via a log in the filesystem. These messages are handled on all
-    # clients through the render_chat_log() method, which listens to the 'sync'
-    # event emitted by the chat_session object.
-    write_chat_message: (opts={}) =>
-        opts = defaults opts,
-            event_type : required  # "chat", "start_video", "stop_video"
-            payload    : required  # event-dependent dictionary
-            cb         : undefined # callback
-
-        new_message = misc.to_json
-            sender_id : redux.getStore('account').get_account_id()
-            date      : new Date()
-            event     : opts.event_type
-            payload   : opts.payload
-
-        @chat_session.live(@chat_session.live() + "\n" + new_message)
-
-        # save to disk after each message
-        @chat_session.save(opts.cb)
-
-    init_chat_toggle: () =>
-        title = @element.find(".salvus-editor-chat-title-text")
-        title.click () =>
-            if @editor._chat_is_hidden? and @editor._chat_is_hidden
-                @show_chat_window()
-            else
-                @hide_chat_window()
-        if @editor._chat_is_hidden
-            @hide_chat_window()
-        else
-            @show_chat_window()
-
-    show_chat_window: () =>
-        # SHOW the chat window
-        @editor._chat_is_hidden = false
-        @editor.local_storage("chat_is_hidden", false)
-        @element.find(".salvus-editor-chat-show").hide()
-        @element.find(".salvus-editor-chat-hide").show()
-        @element.find(".salvus-editor-codemirror-input-box").removeClass('col-sm-12').addClass('col-sm-9')
-        @element.find(".salvus-editor-codemirror-chat-column").show()
-        # see http://stackoverflow.com/questions/4819518/jquery-ui-resizable-does-not-support-position-fixed-any-recommendations
-        # if you want to try to make this resizable
-        @new_chat_indicator(false)
-        @editor.show()  # updates editor width
-        @editor.emit 'show-chat'
-        @render_chat_log()
-
-    hide_chat_window: () =>
-        # HIDE the chat window
-        @editor._chat_is_hidden = true
-        @editor.local_storage("chat_is_hidden", true)
-        @element.find(".salvus-editor-chat-hide").hide()
-        @element.find(".salvus-editor-chat-show").show()
-        @element.find(".salvus-editor-codemirror-input-box").removeClass('col-sm-9').addClass('col-sm-12')
-        @element.find(".salvus-editor-codemirror-chat-column").hide()
-        @editor.show()  # update size/display of editor (especially the width)
-        @editor.emit 'hide-chat'
-
-    new_chat_indicator: (new_chats) =>
-        # Show a new chat indicatorif new_chats=true
-        # if new_chats=true, indicate that there are new chats
-        # if new_chats=false, don't indicate new chats.
-        elt = @element.find(".salvus-editor-chat-new-chats")
-        elt2 = @element.find(".salvus-editor-chat-no-new-chats")
-        if new_chats
-            elt.show()
-            elt2.hide()
-        else
-            elt.hide()
-            elt2.show()
-
-    # This handles every event in a chat log.
-    render_chat_log: () =>
-        if not @chat_session?
-            # try again in a few seconds -- not done loading
-            setTimeout(@render_chat_log, 5000)
-            return
-        messages = @chat_session.live()
-        if not messages?
-            # try again in a few seconds -- not done loading
-            setTimeout(@render_chat_log, 5000)
-            return
-        chat_hash = misc.hash_string(messages)
-        if not @_last_chat_hash?
-            @_last_chat_hash = chat_hash
-        else if @_last_chat_hash != chat_hash
-            @_last_chat_hash = chat_hash
-            @new_chat_indicator(true)
-            if not @editor._chat_is_hidden
-                f = () =>
-                    @new_chat_indicator(false)
-                setTimeout(f, 3000)
-
-        if @editor._chat_is_hidden
-            # For this right here, we need to use the database to determine if user has seen all chats.
-            # But that is a nontrivial project to implement, so save for later.   For now, just start
-            # assuming user has seen them.
-            # done -- no need to render anything.
-            return
-
-        # The chat message area
-        chat_output = @element.find(".salvus-editor-codemirror-chat-output")
-
-        messages = messages.split('\n')
-
-        @_max_chat_length ?= 100
-
-        if messages.length > @_max_chat_length
-            chat_output.append($("<a style='cursor:pointer'>(#{messages.length - @_max_chat_length} chats omited)</a><br>"))
-            chat_output.find("a:first").click (e) =>
-                @_max_chat_length += 100
-                @render_chat_log()
-                chat_output.scrollTop(0)
-            messages = messages.slice(messages.length - @_max_chat_length)
-
-        # Preprocess all inputs to add a 'sender_name' field to all messages
-        # with a 'sender_id'. Also, keep track of whether or not video should
-        # be displayed
-        all_messages = []
-        sender_ids = []
-        for m in messages
-            if $.trim(m) == ""
-                continue
-            try
-                new_message = JSON.parse(m)
-            catch e
-                continue # skip
-
-            all_messages.push(new_message)
-
-            if new_message.sender_id?
-                sender_ids.push(new_message.sender_id)
-
-        salvus_client.get_usernames
-            account_ids : sender_ids
-            cb          : (err, sender_names) =>
-                if err
-                    console.warn("Error getting user names -- ", err)
-                else
-                    # Clear the chat output
-                    chat_output.empty()
-
-                    # Use handler to render each message
-                    last_mesg = undefined
-                    for mesg in all_messages
-
-                        if mesg.sender_id?
-                            user_info = sender_names[mesg.sender_id]
-                            mesg.sender_name = user_info.first_name + " " +
-                                user_info.last_name
-                        else if mesg.name?
-                            mesg.sender_name = mesg.name
-
-                        if mesg.event?
-                            switch mesg.event
-                                when "chat"
-                                    @handle_chat_text_message(mesg, last_mesg)
-                                when "start_video"
-                                    @handle_chat_start_video(mesg)
-                                    video_chat_room_id = mesg.room_id
-                                when "stop_video"
-                                    @handle_chat_stop_video(mesg)
-                        else # handle old-style log messages (chat only)
-                            @handle_old_chat_text_message(mesg, last_mesg)
-
-                        last_mesg = mesg
-
-                    chat_output.scrollTop(chat_output[0].scrollHeight)
-
-                    if @editor._video_is_on? and @editor._video_is_on
-                        @start_video(video_chat_room_id)
-                    else
-                        @stop_video()
-
-    handle_old_chat_text_message: (mesg, last_mesg) =>
-        entry = templates.find(".salvus-chat-entry").clone()
-
-        header = entry.find(".salvus-chat-header")
-
-        sender_name = mesg.sender_name
-
-        # Assign a fixed color to the sender's ID
-        message_color = mesg.color
-
-        date = new Date(mesg.date)
-        if last_mesg?
-            last_date = new Date(last_mesg.date)
-
-        if not last_mesg? or
-          last_mesg.sender_name != mesg.sender_name or
-          (date.getTime() - last_date.getTime()) > 60000
-
-            header.find(".salvus-chat-header-name")
-                .text(mesg.name)
-                .css(color: "#" + mesg.color)
-            header.find(".salvus-chat-header-date")
-                .attr("title", date.toISOString())
-                .timeago()
-
-        else
-            header.hide()
-
-        entry.find(".salvus-chat-entry-content")
-            .html(markdown.markdown_to_html(mesg.mesg.content).s)
-            .mathjax()
-
-        chat_output = @element.find(".salvus-editor-codemirror-chat-output")
-        chat_output.append(entry)
-
-    handle_chat_text_message: (mesg, last_mesg) =>
-        entry = templates.find(".salvus-chat-entry").clone()
-        header = entry.find(".salvus-chat-header")
-
-        sender_name = mesg.sender_name
-
-        # Assign a fixed color to the sender's ID
-        message_color = mesg.sender_id.slice(0, 6)
-
-        date = new Date(mesg.date)
-        if last_mesg?
-            last_date = new Date(last_mesg.date)
-
-        if not last_mesg? or
-          last_mesg.sender_id != mesg.sender_id or
-          (date.getTime() - last_date.getTime()) > 60000
-
-            header.find(".salvus-chat-header-name")
-                .text(sender_name)
-                .css(color: "#" + message_color)
-            header.find(".salvus-chat-header-date")
-                .attr("title", date.toISOString())
-                .timeago()
-        else
-            header.hide()
-
-        entry.find(".salvus-chat-entry-content")
-            .html(markdown.markdown_to_html(mesg.payload.content).s)
-            .mathjax()
-
-        chat_output = @element.find(".salvus-editor-codemirror-chat-output")
-        chat_output.append(entry)
-
-    handle_chat_start_video: (mesg) =>
-        #console.log("Start video message detected: " + mesg.payload.room_id)
-
-        entry = templates.find(".salvus-chat-activity-entry").clone()
-        header = entry.find(".salvus-chat-header")
-
-        sender_name = mesg.sender_name
-
-        # Assign a fixed color to the sender's ID
-        message_color = mesg.sender_id.slice(0, 6)
-
-        date = new Date(mesg.date)
-        if last_mesg?
-            last_date = new Date(last_mesg.date)
-
-        if not last_mesg? or
-          last_mesg.sender_id != mesg.sender_id or
-          (date.getTime() - last_date.getTime()) > 60000
-
-            header.find(".salvus-chat-header-name")
-                .text(sender_name)
-                .css(color: "#" + message_color)
-            header.find(".salvus-chat-header-date")
-                .attr("title", date.toISOString())
-                .timeago()
-        else
-            header.hide()
-
-        header.find(".salvus-chat-header-activity")
-          .html(" started a video chat")
-
-        chat_output = @element.find(".salvus-editor-codemirror-chat-output")
-        chat_output.append(entry)
-
-        @editor._video_is_on = true
-        @editor.local_storage("video_is_on", true)
-        @element.find(".salvus-editor-chat-video-is-off").hide()
-        @element.find(".salvus-editor-chat-video-is-on").show()
-
-    handle_chat_stop_video: (mesg) =>
-        #console.log("Stop video message detected: " + mesg.payload.room_id)
-
-        entry = templates.find(".salvus-chat-activity-entry").clone()
-        header = entry.find(".salvus-chat-header")
-
-        sender_name = mesg.sender_name
-
-        # Assign a fixed color to the sender's ID
-        message_color = mesg.sender_id.slice(0, 6)
-
-        date = new Date(mesg.date)
-        if last_mesg?
-            last_date = new Date(last_mesg.date)
-
-        if not last_mesg? or
-          last_mesg.sender_id != mesg.sender_id or
-          (date.getTime() - last_date.getTime()) > 60000
-
-            header.find(".salvus-chat-header-name")
-                .text(sender_name)
-                .css(color: "#" + message_color)
-            header.find(".salvus-chat-header-date")
-                .attr("title", date.toISOString())
-                .timeago()
-        else
-            header.hide()
-
-        header.find(".salvus-chat-header-activity")
-          .html(" ended a video chat")
-
-        chat_output = @element.find(".salvus-editor-codemirror-chat-output")
-        chat_output.append(entry)
-
-        @editor._video_is_on = false
-        @editor.local_storage("video_is_on", false)
-        @element.find(".salvus-editor-chat-video-is-on").hide()
-        @element.find(".salvus-editor-chat-video-is-off").show()
-
-
-    start_video: (room_id) =>
-        video_height = "232px"
-        @editor._video_chat_room_id = room_id
-
-        video_container = @element.find(".salvus-editor-codemirror-chat-video")
-        video_container.empty()
-        # webpacking this here doesn't, because it needs a parameter and webpack only has js file as targets (if rendered to a file)
-        # maybe https://github.com/webpack/webpack/issues/536 has some answer some day in the future …
-        # TODO make this video chat properly part of the website or get rid of it
-        group_chat_url = window.smc_base_url + "/static/webrtc/group_chat_side.html"
-        video_container.html("<iframe id='#{room_id}' src='#{group_chat_url}?#{room_id}' height='#{video_height}'></iframe>")
-
-        # Update heights of chat and video windows
-        @editor.emit 'show-chat'
-
-    stop_video: () =>
-        video_container = @element.find(".salvus-editor-codemirror-chat-video")
-        video_container.empty()
-
-        # Update heights of chat and video windows
-        @editor.emit 'show-chat'
-
-    init_video_toggle: () =>
-        video_button = @element.find(".salvus-editor-chat-title-video")
-        video_button.click () =>
-            if not @editor._video_is_on
-                @start_video_chat()
-            else
-                @stop_video_chat()
-
-        @editor._video_is_on = false
-
-    start_video_chat: () =>
-        @_video_chat_room_id = Math.floor(Math.random()*1e24 + 1e5)
-        @write_chat_message
-            "event_type" : "start_video"
-            "payload"    : {room_id: @_video_chat_room_id}
-
-    stop_video_chat: () =>
-        @write_chat_message
-            "event_type" : "stop_video"
-            "payload"    : {room_id: @_video_chat_room_id}
 
 underscore = require('underscore')
 
@@ -484,6 +95,7 @@ class SynchronizedString extends AbstractSynchronizedDoc
         @_syncstring.once 'init', =>
             @emit('connect')   # successful connection
             @_syncstring.wait_until_read_only_known (err) =>  # first time open a file, have to look on disk to load it -- this ensures that is done
+                @_fully_loaded = true
                 opts.cb(err, @)
 
         @_syncstring.on 'change', => # only when change is external
@@ -492,8 +104,12 @@ class SynchronizedString extends AbstractSynchronizedDoc
         @_syncstring.on 'before-change', =>
             @emit('before-change')
 
+        @_syncstring.on 'deleted', =>
+            redux.getProjectActions(@project_id).close_tab(@filename)
+
     live: (s) =>
-        if s?
+        if s? and s != @_syncstring.get()
+            @_syncstring.exit_undo_mode()
             @_syncstring.set(s)
             @emit('sync')
         else
@@ -507,13 +123,16 @@ class SynchronizedString extends AbstractSynchronizedDoc
         cb?()
 
     _save: (cb) =>
+        if not @_fully_loaded
+            cb?()
+            return
         async.series([@_syncstring.save, @_syncstring.save_to_disk], cb)
 
     save: (cb) =>
         misc.retry_until_success
             f           : @_save
             start_delay : 3000
-            max_time    : 30000
+            max_tries   : 4
             max_delay   : 10000
             cb          : cb
 
@@ -534,6 +153,21 @@ class SynchronizedString extends AbstractSynchronizedDoc
     has_unsaved_changes: =>
         return @_syncstring.has_unsaved_changes()
 
+    # per-session sync-aware undo
+    undo: () =>
+        @_syncstring.set(@_syncstring.undo())
+        @emit('sync')
+
+    # per-session sync-aware redo
+    redo: () =>
+        @_syncstring.set(@_syncstring.redo())
+        @emit('sync')
+
+    in_undo_mode: () =>
+        return @_syncstring.in_undo_mode()
+
+    exit_undo_mode: () =>
+        return @_syncstring.exit_undo_mode()
 
 class SynchronizedDocument2 extends SynchronizedDocument
     constructor: (@editor, opts, cb) ->
@@ -549,13 +183,23 @@ class SynchronizedDocument2 extends SynchronizedDocument
         @codemirror1 = @editor.codemirror1
         @element     = @editor.element
 
-        @_users = smc.redux.getStore('users')  # todo -- obviously not like this...
+        # replace undo/redo by sync-aware versions
+        for cm in [@codemirror, @codemirror1]
+            cm.undo = @undo
+            cm.redo = @redo
+
+        @_users = redux.getStore('users')  # TODO -- obviously not like this...
 
         @_other_cursor_timeout_s = 30  # only show active other cursors for this long
 
         @editor.show_startup_message("Loading...", 'info')
         @codemirror.setOption('readOnly', true)
         @codemirror1.setOption('readOnly', true)
+
+        if @filename[0] == '/'
+            # uses symlink to '/', which is created by start_smc
+            @filename = '.smc/root' + @filename
+
         id = require('smc-util/schema').client_db.sha1(@project_id, @filename)
         @_syncstring = salvus_client.sync_string
             id         : id
@@ -577,16 +221,20 @@ class SynchronizedDocument2 extends SynchronizedDocument
         #dbg("waiting for first change")
 
         @_syncstring.once 'init', (err) =>
+            if @_closed
+                return
             if err
-                window.err = err
                 if err.code == 'EACCES'
                     err = "You do not have permission to read '#{@filename}'."
                 @editor.show_startup_message(err, 'danger')
                 return
             # Now wait until read_only is *defined*, so backend file has been opened.
             @_syncstring.wait_until_read_only_known (err) =>
+                if @_closed
+                    return
                 @editor.show_content()
                 @editor._set(@_syncstring.get())
+                @_fully_loaded = true
                 @codemirror.setOption('readOnly', false)
                 @codemirror1.setOption('readOnly', false)
                 @codemirror.clearHistory()  # ensure that the undo history doesn't start with "empty document"
@@ -598,17 +246,28 @@ class SynchronizedDocument2 extends SynchronizedDocument
                 @_init_cursor_activity()
 
                 @_syncstring.on 'change', =>
+                    if @_closed
+                        return
                     #dbg("got upstream syncstring change: '#{misc.trunc_middle(@_syncstring.get(),400)}'")
                     @codemirror.setValueNoJump(@_syncstring.get())
                     @emit('sync')
 
                 @_syncstring.on 'metadata-change', =>
+                    if @_closed
+                        return
                     update_unsaved_uncommitted_changes()
                     @_update_read_only()
 
                 @_syncstring.on 'before-change', =>
+                    if @_closed
+                        return
                     #console.log("syncstring before change")
                     @_syncstring.set(@codemirror.getValue())
+
+                @_syncstring.on 'deleted', =>
+                    if @_closed
+                        return
+                    redux.getProjectActions(@editor.project_id).close_tab(@filename)
 
                 save_state = () => @_sync()
                 # We debounce instead of throttle, because we want a single "diff/commit" to correspond
@@ -617,6 +276,8 @@ class SynchronizedDocument2 extends SynchronizedDocument
                 @save_state_debounce = underscore.debounce(save_state, @opts.sync_interval)
 
                 @codemirror.on 'change', (instance, changeObj) =>
+                    if @_closed
+                        return
                     #console.log("change event when live='#{@live().string()}'")
                     if changeObj.origin?
                         if changeObj.origin == 'undo'
@@ -626,18 +287,11 @@ class SynchronizedDocument2 extends SynchronizedDocument
                         if changeObj.origin != 'setValue'
                             @_last_change_time = new Date()
                             @save_state_debounce()
+                            @_syncstring.exit_undo_mode()
                     update_unsaved_uncommitted_changes()
 
                 @emit('connect')   # successful connection
                 cb?()  # done initializing document (this is used, e.g., in the SynchronizedWorksheet derived class).
-
-        synchronized_string
-            project_id    : @project_id
-            filename      : misc.meta_file(@filename, 'chat')
-            cb            : (err, chat_session) =>
-                if not err  # err actually can't happen, since we retry until success...
-                    @chat_session = chat_session
-                    @init_chat()
 
     has_unsaved_changes: =>
         if not @codemirror?
@@ -672,25 +326,36 @@ class SynchronizedDocument2 extends SynchronizedDocument
     sync: (cb) =>
         @_sync(cb)
 
-    # completely disable undo/redo functionality, and make hitting control+z pop up the
-    # time travel history slider.
-    disable_undo: () =>
-        @codemirror.setOption('undoDepth',1)
-        @codemirror1.setOption('undoDepth',1)
-        @editor.element.find("a[href=#undo]").remove()
-        @editor.element.find("a[href=#redo]").remove()
-        @codemirror.on 'beforeChange', (instance, changeObj) =>
-            if changeObj.origin == 'undo' or changeObj.origin == 'redo'
-                changeObj.cancel()
-                @editor.click_history_button()
+    # per-session sync-aware undo
+    undo: () =>
+        if not @codemirror?
+            return
+        cm = @focused_codemirror()  # see https://github.com/sagemathinc/smc/issues/1161
+        if not @_syncstring.in_undo_mode()
+            @_syncstring.set(cm.getValue())
+        value = @_syncstring.undo()
+        cm.setValueNoJump(value, true)
+        @save_state_debounce()
+        @_last_change_time = new Date()
+
+    # per-session sync-aware redo
+    redo: () =>
+        if not @codemirror?
+            return
+        if not @_syncstring.in_undo_mode()
+            return
+        value = @_syncstring.redo()
+        @focused_codemirror().setValueNoJump(value, true)
+        @save_state_debounce()
+        @_last_change_time = new Date()
 
     _connect: (cb) =>
         # no op
         cb?()
 
     _save: (cb) =>
-        if not @codemirror?
-            cb() # nothing to do -- not initialized yet...
+        if not @codemirror? or not @_fully_loaded
+            cb() # nothing to do -- not initialized/loaded yet...
             return
         @_syncstring.set(@codemirror.getValue())
         async.series [@_syncstring.save, @_syncstring.save_to_disk], (err) =>
@@ -702,6 +367,14 @@ class SynchronizedDocument2 extends SynchronizedDocument
                 cb()
 
     save: (cb) =>
+        if @_closed
+            cb?()
+            return
+        # This first call immediately sets saved button to disabled to make it feel like instant save.
+        @editor.has_unsaved_changes(false)
+        # We then simply ensure the save state is valid 5s later (in case save fails, say).
+        setTimeout(@_update_unsaved_uncommitted_changes, 5000)
+
         cm = @focused_codemirror()
         if @editor.opts.delete_trailing_whitespace
             omit_lines = {}
@@ -714,7 +387,7 @@ class SynchronizedDocument2 extends SynchronizedDocument
         misc.retry_until_success
             f           : @_save
             start_delay : 3000
-            max_time    : 30000
+            max_tries   : 4
             max_delay   : 10000
             cb          : cb
 
@@ -735,6 +408,14 @@ class SynchronizedDocument2 extends SynchronizedDocument
 
         @_syncstring.on 'cursor_activity', (account_id) =>
             @_render_other_cursor(account_id)
+
+    get_users_cursors: (account_id) =>
+        x = @_syncstring.get_cursors()?.get(account_id)
+        #console.log("_render_other_cursor", x?.get('time'), misc.seconds_ago(@_other_cursor_timeout_s))
+        # important: must use server time to compare, not local time.
+        if salvus_client.server_time() - x?.get('time') <= @_other_cursor_timeout_s*1000
+            locs = x.get('locs')?.toJS()
+            return locs
 
     _render_other_cursor: (account_id) =>
         if account_id == salvus_client.account_id
@@ -777,10 +458,10 @@ class SynchronizedDocument2 extends SynchronizedDocument
             @codemirror.addWidget(pos, data.cursor[0], false)
 
             # Update cursor fade-out
-            # LABEL: first fade the label out over 6s
-            data.cursor.find(".smc-editor-codemirror-cursor-label").stop().animate(opacity:1).show().fadeOut(duration:6000)
-            # CURSOR: then fade the cursor out (a non-active cursor is a waste of space) over 20s.
-            data.cursor.find(".smc-editor-codemirror-cursor-inside").stop().animate(opacity:1).show().fadeOut(duration:20000)
+            # LABEL: first fade the label out over 15s
+            data.cursor.find(".smc-editor-codemirror-cursor-label").stop().animate(opacity:1).show().fadeOut(duration:15000)
+            # CURSOR: then fade the cursor out (a non-active cursor is a waste of space) over 25s.
+            data.cursor.find(".smc-editor-codemirror-cursor-inside").stop().animate(opacity:1).show().fadeOut(duration:25000)
 
         if x.length > locs.length
             # Next remove any cursors that are no longer there (e.g., user went from 5 cursors to 1)
@@ -797,7 +478,6 @@ class SynchronizedDocument2 extends SynchronizedDocument
         if @_closed
             return
         @_syncstring?.close()
-        @chat_session?.close()
         # TODO -- this doesn't work...
         for cm in [@codemirror, @codemirror1]
             cm.setOption("mode", "text/x-csrc")

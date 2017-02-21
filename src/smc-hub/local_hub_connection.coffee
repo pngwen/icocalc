@@ -215,6 +215,8 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
             options    : mesg.options
             changes    : if mesg.changes then mesg_id
             cb         : (err, result) =>
+                if result?.action == 'close'
+                    err = 'close'
                 if err
                     dbg("project_query error: #{misc.to_json(err)}")
                     if @_query_changefeeds?[mesg_id]
@@ -506,7 +508,7 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
                 if not socket?
                     @dbg("still don't have our connection -- try again")
                     f (err, _socket) =>
-                       socket = _socket; cb(err)
+                        socket = _socket; cb(err)
                 else
                     cb()
         ], (err) =>
@@ -574,12 +576,8 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
         key = "#{opts.session_uuid}:#{opts.client_id}"
         socket = @_sockets[key]
         if socket?
-            try
-                winston.debug("ending local_hub socket for #{key}")
-                socket.end()
-            catch e
-                @dbg("_open_session_socket: exception ending existing socket: #{e}")
-            delete @_sockets[key]
+            opts.cb(false, socket)
+            return
 
         socket = undefined
         async.series([
@@ -590,6 +588,7 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
                         cb(err)
                     else
                         socket = _socket
+                        socket._key = key
                         @_sockets[key] = socket
                         if not @_sockets_by_client_id[opts.client_id]?
                             @_sockets_by_client_id[opts.client_id] = [socket]
@@ -645,7 +644,7 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
         opts = defaults opts,
             client       : required
             project_id   : required
-            params       : {command: 'bash'}
+            params       : required
             session_uuid : undefined   # if undefined, a new session is created; if defined, connect to session or get error
             cb           : required    # cb(err, [session_connected message])
         @dbg("console_session: connect client to console session -- session_uuid=#{opts.session_uuid}")
@@ -666,11 +665,15 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
                     opts.cb(err)
                     return
 
+                # In case it was already setup to listen before... (and client is reconnecting)
+                console_socket.removeAllListeners()
+
                 console_socket._ignore = false
                 console_socket.on 'end', () =>
                     winston.debug("console_socket (session_uuid=#{opts.session_uuid}): received 'end' so setting ignore=true")
+                    opts.client.push_to_client(message.terminate_session(session_uuid:opts.session_uuid))
                     console_socket._ignore = true
-                    delete @_sockets[opts.session_uuid]
+                    delete @_sockets[console_socket._key]
 
                 # Plug the two consoles together
                 #
@@ -699,7 +702,6 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
                     data_channel : channel
                     history      : console_socket.history
 
-                delete console_socket.history  # free memory occupied by history, which we won't need again.
                 opts.cb(false, mesg)
 
                 # console --> client:
@@ -711,6 +713,9 @@ class LocalHub # use the function "new_local_hub" above; do not construct this d
                         data = "[...]" + data.slice(data.length - 20000)
                     #winston.debug("push_data_to_client('#{data}')")
                     opts.client.push_data_to_client(channel, data)
+                    console_socket.history += data
+                    if console_socket.history.length > 150000
+                        console_socket.history = console_socket.history.slice(console_socket.history.length - 100000)
                 console_socket.on('data', f)
 
     terminate_session: (opts) =>

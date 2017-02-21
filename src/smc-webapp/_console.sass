@@ -1,118 +1,92 @@
 .special
-  color: #f00
+  color : #f00
 
 .salvus-console
-  background-color: #eaeaea
-  padding: 0px
-  margin: 0px
-  width: 100%
-  border: 0px solid black
+  background-color : #eaeaea
+  padding          : 0px
+  margin           : 0px
+  border           : 0px solid black
 
 .salvus-console-topbar
-  padding: 0px
-  margin: 0px
-  overflow: hidden
+  padding  : 0px
+  margin   : 0px
+  overflow : hidden
+  border   : 1px solid lightgrey
 
 .salvus-console-filename
-  padding: 10px
-  font-weight: bold
-  color: #555
-  padding-top: 4px
-  padding-bottom: 0
+  padding        : 10px
+  font-weight    : bold
+  color          : #555
+  padding-top    : 4px
+  padding-bottom : 0
 
 .salvus-console-title
-  padding: 10px
-  font-weight: bold
-  overflow: hidden
-  color: #555
-  max-width: 40%
-  max-height: 1.5em
-  padding-top: 4px
-  padding-bottom: 0
+  padding        : 10px
+  font-weight    : bold
+  overflow       : hidden
+  color          : #555
+  max-width      : 40%
+  max-height     : 1.5em
+  padding-top    : 4px
+  padding-bottom : 0
+  padding-right  : 50px
 
 .salvus-console-description
-  color: #888
+  color : #888
 
 .salvus-console-for-mobile
-  position: absolute
-  opacity: 0
-  color: #fff
+  position : absolute
+  opacity  : 0
+  color    : #fff
 
 .salvus-console-terminal
-  font-family: droid-sans-mono
-  /* really set in console.coffee, overriding this! */
-  padding: 1ex
-  margin: 0px
-  white-space: nowrap
-  /* critical at least for firefox and IE */
+  height      : 100%
+  width       : 100%
+  position    : absolute
+  font-family : droid-sans-mono
+  padding     : 1px
+  margin      : 0px
+  padding     : 5px
+  white-space : nowrap
+  flex        : 1
 
 .salvus-console-scrollbar
-  position: absolute
-  right: 0
-  width: 10px
-  border: none
-  overflow-x: hidden
-  overflow-y: scroll
+  height     : 99.5%
+  overflow-x : hidden
+  overflow-y : scroll
+  z-index    : 1          /* so terminal text doesn't appear visible when horizontally resizing */
 
 .salvus-console-cursor-blur
-  border: 1px solid grey
-  border-radius: 3px
+  border        : 1px solid grey
+  border-radius : 3px
 
 .salvus-console-cursor-focus
-  //-webkit-animation: salvus-cursor-blink 1.3s linear 0s infinite
-  //-moz-animation: salvus-cursor-blink 1.3s linear 0s infinite
-  //-ms-animation: salvus-cursor-blink 1.3s linear 0s infinite
-  //-o-animation: salvus-cursor-blink 1.3s linear 0s infinite
   background: #FF0000
   color: #ffffff
   opacity: 0.5
-  /* Fallback for browsers without animation support */
+  border         : 1px solid #555
+  margin         : -1px
 
-@-webkit-keyframes salvus-cursor-blink
+@keyframes salvus-cursor-blink
   0%, 40%
-    background: #000
-    color: #fff
+    -webkit-filter: invert(1.0)
+    filter: invert(1.0)
   50%, 90%
-    background: #fff
-    color: #000
-
-
-@-moz-keyframes salvus-cursor-blink
-  0%, 40%
-    background: #000
-    color: #fff
-  50%, 90%
-    background: #fff
-    color: #000
-
-
-@-ms-keyframes salvus-cursor-blink
-  0%, 40%
-    background: #000
-    color: #fff
-  50%, 90%
-    background: #fff
-    color: #000
-
-
-@-o-keyframes salvus-cursor-blink
-  0%, 40%
-    background: #000
-    color: #fff
-  50%, 90%
-    background: #fff
-    color: #000
-
+    -webkit-filter: invert(0.0)
+    filter: invert(0.0)
 
 .salvus-console-textarea
-  height: 0px
-  width: 0px
-  border: 0px solid white
-  opacity: 0
-  position: fixed
+  height   : 0px
+  width    : 0px
+  border   : 0px solid white
+  opacity  : 0
+  position : fixed
 
 .salvus-console-focus
-  background-color: #ffffe8
+  border        : 1px solid #77b6e8
+  border-radius : 4px
+  box-shadow    : inset 0 0 4px #77b6e8
 
 .salvus-console-blur
-  background-color: #ccc
+  border        : 1px solid lightgrey
+  border-radius : 4px

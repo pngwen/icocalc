@@ -1,8 +1,8 @@
-###############################################################################
+##############################################################################
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2015, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -57,7 +57,7 @@ schema = require('smc-util/schema')
     Panel, Popover, Tabs, Tab, Well} = require('react-bootstrap')
 
 {ActivityDisplay, ErrorDisplay, Help, Icon, Loading,
-    SaveButton, SearchInput, SelectorInput, Space, TextInput, TimeAgo, Tip, NumberInput} = require('../r_misc')
+    SaveButton, SearchInput, SelectorInput, Space, TextInput, TimeAgo, NumberInput} = require('../r_misc')
 
 # Course components
 #{CourseActions} = require('./course_editor_components/actions')
@@ -81,7 +81,7 @@ primary_key =
     handouts    : 'handout_id'
 
 syncdbs = {}
-exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
+init_redux = (course_filename, redux, course_project_id) ->
     the_redux_name = redux_name(course_project_id, course_filename)
     get_actions = ->redux.getActions(the_redux_name)
     get_store = -> redux.getStore(the_redux_name)
@@ -91,7 +91,6 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
     syncdb = undefined
     user_store = redux.getStore('users')
     class CourseActions extends Actions
-        # INTERNAL API
         _loaded: =>
             if not syncdb?
                 @set_error("attempt to set syncdb before loading")
@@ -161,6 +160,17 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
                 @setState(t)
                 @setState(unsaved:syncdb?.has_unsaved_changes())
 
+        handle_projects_store_update: (state) =>
+            users = state.getIn(['project_map', course_project_id, 'users'])?.keySeq()
+            if not users?
+                return
+            if not @_last_collaborator_state?
+                @_last_collaborator_state = users
+                return
+            if not @_last_collaborator_state.equals(users)
+                @configure_all_projects()
+            @_last_collaborator_state = users
+
         # PUBLIC API
 
         set_error: (error) =>
@@ -206,6 +216,9 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             @_update(set:{description:description}, where:{table:'settings'})
             @set_all_student_project_descriptions(description)
 
+        set_allow_collabs: (allow_collabs) =>
+            @_update(set:{allow_collabs:allow_collabs}, where:{table:'settings'})
+
         set_email_invite: (body) =>
             @_update(set:{email_invite:body}, where:{table:'settings'})
 
@@ -238,19 +251,39 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
                 return  # no shared project
             # add collabs -- all collaborators on course project and all students
             projects = redux.getStore('projects')
-            current = projects.get_users(shared_project_id)
-            if not current?
+            shared_project_users = projects.get_users(shared_project_id)
+            if not shared_project_users?
                 return
+            course_project_users = projects.get_users(course_project_id)
+            if not course_project_users?
+                return
+            student_account_ids = {}
+            store.get_students().map (student, _) =>
+                if not student.get('deleted')
+                    account_id = student.get('account_id')
+                    if account_id?
+                        student_account_ids[account_id] = true
+
+            # Each of shared_project_users or course_project_users are
+            # immutable.js maps from account_id's to something, and students is a map from
+            # the student account_id's.
+            # Our goal is to ensur that:
+            #   {shared_project_users} = {course_project_users} union {students}.
+
             actions = redux.getActions('projects')
-            invite = (account_id) =>
-                actions.invite_collaborator(shared_project_id, account_id)
-            projects.get_users(course_project_id).map (_, account_id) =>
-                if not current.get(account_id)?
-                    invite(account_id)
-            store.get_students().map (student, student_id) =>
-                account_id = student.get('account_id')
-                if account_id? and not current.get(account_id)?
-                    invite(account_id)
+            if not store.get_allow_collabs()
+                # Ensure the shared project users are all either course or students
+                shared_project_users.map (_, account_id) =>
+                    if not course_project_users.get(account_id) and not student_account_ids[account_id]
+                        actions.remove_collaborator(shared_project_id, account_id)
+            # Ensure every course project user is on the shared project
+            course_project_users.map (_, account_id) =>
+                if not shared_project_users.get(account_id)
+                    actions.invite_collaborator(shared_project_id, account_id)
+            # Ensure every student is on the shared project
+            for account_id, _ of student_account_ids
+                if not shared_project_users.get(account_id)
+                    actions.invite_collaborator(shared_project_id, account_id)
 
         # set the shared project id in our syncdb
         _set_shared_project_id: (project_id) =>
@@ -282,6 +315,20 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
         set_course_info: (pay='') =>
             @_update(set:{pay:pay}, where:{table:'settings'})
             @set_all_student_project_course_info(pay)
+
+        # Takes an item_name and the id of the time
+        # item_name should be one of
+        # ['student', 'assignment', handout']
+        toggle_item_expansion: (item_name, item_id) =>
+            store = get_store()
+            return if not store?
+            field_name = "expanded_#{item_name}s"
+            expanded_items = store.get(field_name)
+            if expanded_items.has(item_id)
+                adjusted = expanded_items.delete(item_id)
+            else
+                adjusted = expanded_items.add(item_id)
+            @setState("#{field_name}" : adjusted)
 
         # Students
         add_students: (students) =>
@@ -330,6 +377,7 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             @_update
                 set   : {deleted : true}
                 where : {student_id : student.get('student_id'), table : 'students'}
+            @configure_all_projects()   # since they may get removed from shared project, etc.
 
         undelete_student: (student) =>
             store = get_store()
@@ -338,6 +386,7 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             @_update
                 set   : {deleted : false}
                 where : {student_id : student.get('student_id'), table : 'students'}
+            @configure_all_projects()   # since they may get added back to shared project, etc.
 
         # Some students might *only* have been added using their email address, but they
         # subsequently signed up for an SMC account.  We check for any of these and if
@@ -366,6 +415,26 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
                                 @_update
                                     set   : {account_id: x.account_id}
                                     where : {table: 'students', student_id: v[x.email_address]}
+
+        # columns: first_name ,last_name, email, last_active, hosting
+        # Toggles ascending/decending order
+        set_active_student_sort: (column_name) =>
+            store = get_store()
+            current_column = store.getIn(['active_student_sort', 'column_name'])
+            if current_column == column_name
+                is_descending = not get_store().getIn(['active_student_sort', 'is_descending'])
+            else
+                is_descending = false
+            @setState(active_student_sort : {column_name, is_descending})
+
+        set_internal_student_name: (student, first_name, last_name) =>
+            store = get_store()
+            return if not store?
+            student = store.get_student(student)
+            @_update
+                set   : {first_name, last_name}
+                where : {student_id : student.get('student_id'), table : 'students'}
+            @configure_all_projects()   # since they may get removed from shared project, etc.
 
         # Student projects
 
@@ -419,18 +488,23 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             # Add student and all collaborators on this project to the project with given project_id.
             # users = who is currently a user of the student's project?
             users = redux.getStore('projects').get_users(student_project_id)  # immutable.js map
+            if not users?
+                # can't do anything if this isn't known...
+                return
             # Define function to invite or add collaborator
             s = get_store()
             body = s.get_email_invite()
             invite = (x) ->
+                account_store = redux.getStore('account')
+                name    = account_store.get_fullname()
+                replyto = account_store.get_email_address()
                 if '@' in x
                     if not do_not_invite_student_by_email
                         title   = s.getIn(['settings', 'title'])
                         subject = "SageMathCloud Invitation to Course #{title}"
-                        name    = redux.getStore('account').get_fullname()
                         body    = body.replace(/{title}/g, title).replace(/{name}/g, name)
                         body    = markdownlib.markdown_to_html(body).s
-                        redux.getActions('projects').invite_collaborators_by_email(student_project_id, x, body, subject, true)
+                        redux.getActions('projects').invite_collaborators_by_email(student_project_id, x, body, subject, true, replyto, name)
                 else
                     redux.getActions('projects').invite_collaborator(student_project_id, x)
             # Make sure the student is on the student's project:
@@ -445,8 +519,13 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             if not target_users?
                 return  # projects store isn't sufficiently initialized, so we can't do this yet...
             target_users.map (_, account_id) =>
-                if not users?.get(account_id)?
+                if not users.get(account_id)?
                     invite(account_id)
+            if not s.get_allow_collabs()
+                # Remove anybody extra on the student project
+                users.map (_, account_id) =>
+                    if not target_users.get(account_id)? and account_id != student_account_id
+                        redux.getActions('projects').remove_collaborator(student_project_id, account_id)
 
         configure_project_visibility: (student_project_id) =>
             users_of_student_project = redux.getStore('projects').get_users(student_project_id)
@@ -470,13 +549,34 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
         action_all_student_projects: (action) =>
             if action not in ['start', 'stop', 'restart']
                 throw Error("action must be start, stop or restart")
-            get_store()?.get_students().map (student, student_id) =>
-                if not student.get('deleted')
-                    # really only start non-deleted students' projects
-                    student_project_id = student.get('project_id')
-                    if student_project_id?
-                        redux.getActions('projects')[action+"_project"](student_project_id)
             @action_shared_project(action)
+
+            # Returns undefined if no store.
+            act_on_student_projects = () =>
+                return get_store()?.get_students()
+                    .filter (student) =>
+                        not student.get('deleted') and student.get('project_id')?
+                    .map (student) =>
+                        redux.getActions('projects')[action+"_project"](student.get('project_id'))
+            if not act_on_student_projects()
+                return
+
+            if @prev_interval_id?
+                window.clearInterval(@prev_interval_id)
+            if @prev_timeout_id?
+                window.clearTimeout(@prev_timeout_id)
+
+            clear_state = () =>
+                window.clearInterval(@prev_interval_id)
+                @setState(action_all_projects_state : "any")
+
+            @prev_interval_id = window.setInterval(act_on_student_projects, 30000)
+            @prev_timeout_id = window.setTimeout(clear_state, 300000) # 5 minutes
+
+            if action in ['start', 'restart']
+                @setState(action_all_projects_state : "starting")
+            else if action == 'stop'
+                @setState(action_all_projects_state : "stopping")
 
         set_all_student_project_titles: (title) =>
             actions = redux.getActions('projects')
@@ -1443,6 +1543,10 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
         get_pay: =>
             return @getIn(['settings', 'pay']) ? ''
 
+        get_allow_collabs: =>
+            return true  # see https://github.com/sagemathinc/smc/issues/1494
+            # return @getIn(['settings', 'allow_collabs']) ? false
+
         get_email_invite: =>
             host = window.location.hostname
             @getIn(['settings', 'email_invite']) ? "We will use [SageMathCloud](https://#{host}) for the course *{title}*.  \n\nPlease sign up!\n\n--\n\n{name}"
@@ -1453,20 +1557,30 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
         get_students: =>
             @get('students')
 
+        # Uses an instructor given name if it exists
         get_student_name: (student, include_email=false) =>
             student = @get_student(student)
             if not student?
                 return 'student'
             email = student.get('email_address')
-            name = user_store.get_name(student.get('account_id'))
-            n = name ? email ? 'student'
-            if not include_email
-                return n
-            if include_email and name? and email?
-                full = n + " <#{email}>"
+            account_id = student.get('account_id')
+            first_name = student.get('first_name') ? user_store.get_first_name(account_id)
+            last_name = student.get('last_name') ? user_store.get_last_name(account_id)
+            if first_name? and last_name?
+                full_name = first_name + ' ' + last_name
+            else if first_name?
+                full_name = first_name
+            else if last_name?
+                full_name = last_name
             else
-                full = n
-            return {simple:n.replace(/\W/g, ' '), full:full}
+                full_name = email ? 'student'
+            if not include_email
+                return full_name
+            if include_email and full_name? and email?
+                full = full_name + " <#{email}>"
+            else
+                full = full_name
+            return {simple:full_name.replace(/\W/g, ' '), full:full}
 
         get_student_email: (student) =>
             student = @get_student(student)
@@ -1758,14 +1872,20 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
             @_handout_status[handout_id] = info
             return info
 
-    redux.createStore(the_redux_name, CourseStore)
+    initial_store_state =
+        expanded_students    : immutable.Set() # Set of student id's (string) which should be expanded on render
+        expanded_assignments : immutable.Set() # Set of assignment id's (string) which should be expanded on render
+        expanded_handouts    : immutable.Set() # Set of handout id's (string) which should be expanded on render
+        active_student_sort  : {column_name : "last_name", is_descending : false}
+
+    redux.createStore(the_redux_name, CourseStore, initial_store_state)
 
     synchronized_db
         project_id : course_project_id
         filename   : course_filename
         cb         : (err, _db) ->
             if err
-                get_actions().set_error("unable to open #{@filename}")
+                get_actions()?.set_error("unable to open #{@filename}")
             else
                 syncdbs[the_redux_name] = syncdb = _db
                 i = course_filename.lastIndexOf('.')
@@ -1781,21 +1901,43 @@ exports.init_redux = init_redux = (redux, course_project_id, course_filename) ->
                         t.handouts[x.handout_id] = misc.copy_without(x, 'table')
                 for k, v of t
                     t[k] = immutable.fromJS(v)
-                get_actions().setState(t)
-                syncdb.on('change', (changes) -> get_actions()._syncdb_change(changes))
+                get_actions()?.setState(t)
+                syncdb.on('change', (changes) -> get_actions()?._syncdb_change(changes))
+                syncdb.on('sync', => redux.getProjectActions(@project_id).flag_file_activity(@filename))
 
                 # Wait until the projects store has data about users of our project before configuring anything.
-                redux.getStore('projects').wait
+                projects_store = redux.getStore('projects')
+                projects_store.wait
                     until   :  (store) -> store.get_users(course_project_id)?
                     timeout : 30
                     cb      : ->
                         actions = get_actions()
+                        if not actions?
+                            return
                         actions.lookup_nonregistered_students()
                         actions.configure_all_projects()
 
-    return # don't return syncdb above
+                        # Also
+                        projects_store.on 'change', actions.handle_projects_store_update
+                        actions.handle_projects_store_update(projects_store)  # initialize
 
-CourseEditor = (name) -> rclass
+    return the_redux_name
+
+remove_redux = (course_filename, redux, course_project_id) ->
+    the_redux_name = redux_name(course_project_id, course_filename)
+
+    # Remove the listener for changes in the collaborators on this project.
+    actions = redux.getActions(the_redux_name)
+    redux.getStore('projects').removeListener('change', actions.handle_projects_store_update)
+
+    # Remove the store and actions.
+    redux.removeStore(the_redux_name)
+    redux.removeActions(the_redux_name)
+    syncdbs[the_redux_name]?.destroy()
+    delete syncdbs[the_redux_name]
+    return the_redux_name
+
+CourseEditor = rclass ({name}) ->
     displayName : "CourseEditor-Main"
 
     reduxProps :
@@ -1819,26 +1961,28 @@ CourseEditor = (name) -> rclass
         project_id  : rtypes.string.isRequired
         path        : rtypes.string.isRequired
 
-    render_activity : ->
+    render_activity: ->
         <ActivityDisplay activity={misc.values(@props.activity)} trunc=80
             on_clear={=>@props.redux.getActions(@props.name).clear_activity()} />
 
-    render_error : ->
+    render_error: ->
         <ErrorDisplay error={@props.error}
                       onClose={=>@props.redux.getActions(@props.name).set_error('')} />
 
-    render_save_button : ->
+    render_save_button: ->
         <SaveButton saving={@props.saving} unsaved={true} on_click={=>@props.redux.getActions(@props.name).save()}/>
 
-    show_files : ->
+    show_files: ->
         @props.redux?.getProjectActions(@props.project_id).set_focused_page('project-file-listing')
 
-    render_files_button : ->
+    render_files_button: ->
         <Button className='smc-small-only' style={float:'right', marginLeft:'15px'}
                 onClick={@show_files}><Icon name='toggle-up'/> Files</Button>
 
-    render_title : ->
-        <h4 className='smc-big-only' style={float:'right'}>{misc.trunc(@props.settings?.get('title'),40)}</h4>
+    render_title: ->
+        <h4 className='smc-big-only' style={float:'right', marginTop: '5px', marginBottom: '0px'}>
+            {misc.trunc(@props.settings?.get('title'),40)}
+        </h4>
 
     show_timetravel: ->
         @props.redux?.getProjectActions(@props.project_id).open_file
@@ -1870,7 +2014,7 @@ CourseEditor = (name) -> rclass
     num_handouts: ->
         @props.redux.getStore(@props.name)?.num_handouts()
 
-    render_students : ->
+    render_students: ->
         if @props.redux? and @props.students? and @props.user_map? and @props.project_map?
             <StudentsPanel redux={@props.redux} students={@props.students}
                       name={@props.name} project_id={@props.project_id}
@@ -1880,23 +2024,24 @@ CourseEditor = (name) -> rclass
         else
             return <Loading />
 
-    render_assignments : ->
+    render_assignments: ->
         if @props.redux? and @props.assignments? and @props.user_map? and @props.students?
             <AssignmentsPanel actions={@props.redux.getActions(@props.name)} redux={@props.redux} all_assignments={@props.assignments}
                 name={@props.name} project_id={@props.project_id} user_map={@props.user_map} students={@props.students} />
         else
             return <Loading />
 
-    render_handouts : ->
+    render_handouts: ->
         if @props.redux? and @props.assignments? and @props.user_map? and @props.students?
             <HandoutsPanel actions={@props.redux.getActions(@props.name)} all_handouts={@props.handouts}
                 project_id={@props.project_id} user_map={@props.user_map} students={@props.students}
-                store={@props.redux.getStore(@props.name)} project_actions={@props.redux.getProjectActions(@props.project_id)}
+                store_object={@props.redux.getStore(@props.name)} project_actions={@props.redux.getProjectActions(@props.project_id)}
+                name={@props.name}
                 />
         else
             return <Loading />
 
-    render_settings : ->
+    render_settings: ->
         if @props.redux? and @props.settings?
             <SettingsPanel redux={@props.redux} settings={@props.settings}
                       name={@props.name} project_id={@props.project_id}
@@ -1912,69 +2057,38 @@ CourseEditor = (name) -> rclass
         else
             return <Loading />
 
-    render : ->
-        <div>
+    render: ->
+        <div style={padding:"7px 7px 7px 7px", borderTop: '1px solid rgb(170, 170, 170)'}>
             {@render_save_button() if @props.show_save_button}
             {@render_error() if @props.error}
             {@render_activity() if @props.activity?}
             {@render_files_button()}
             {@render_title()}
             {@render_save_timetravel()}
-            <Tabs animation={false} activeKey={@props.tab} onSelect={(key)=>@props.redux?.getActions(@props.name).set_tab(key)}>
+            <Tabs id='course-tabs' animation={false} activeKey={@props.tab} onSelect={(key)=>@props.redux?.getActions(@props.name).set_tab(key)}>
                 <Tab eventKey={'students'} title={<StudentsPanel.Header n={@num_students()} />}>
-                    <div style={marginTop:'8px'}></div>
                     {@render_students()}
                 </Tab>
                 <Tab eventKey={'assignments'} title={<AssignmentsPanel.Header n={@num_assignments()}/>}>
-                    <div style={marginTop:'8px'}></div>
                     {@render_assignments()}
                 </Tab>
                 <Tab eventKey={'handouts'} title={<HandoutsPanel.Header n={@num_handouts()}/>}>
-                    <div style={marginTop:'8px'}></div>
                     {@render_handouts()}
                 </Tab>
                 <Tab eventKey={'settings'} title={<SettingsPanel.Header />}>
-                    <div style={marginTop:'8px'}></div>
+                    <div style={marginTop:'1em'}></div>
                     {@render_settings()}
                 </Tab>
                 <Tab eventKey={'shared_project'} title={<SharedProjectPanel.Header project_exists={!!@props.settings?.get('shared_project_id')}/>}>
-                    <div style={marginTop:'8px'}></div>
+                    <div style={marginTop:'1em'}></div>
                     {@render_shared_project()}
                 </Tab>
             </Tabs>
         </div>
 
-render = (redux, project_id, path) ->
-    name = redux_name(project_id, path)
-    # dependence on account below is for adjusting quotas
-    CourseEditor_connected = CourseEditor(name)
-    <Redux redux={redux}>
-        <CourseEditor_connected redux={redux} name={name} project_id={project_id} path={path} />
-    </Redux>
-
-exports.render_course = (project_id, path, dom_node, redux) ->
-    init_redux(redux, project_id, path)
-    ReactDOM.render(render(redux, project_id, path), dom_node)
-
-exports.hide_course = (project_id, path, dom_node, redux) ->
-    #console.log("hide_course")
-    ReactDOM.unmountComponentAtNode(dom_node)
-
-exports.show_course = (project_id, path, dom_node, redux) ->
-    #console.log("show_course")
-    ReactDOM.render(render(redux, project_id, path), dom_node)
-
-exports.free_course = (project_id, path, dom_node, redux) ->
-    fname = redux_name(project_id, path)
-    db = syncdbs[fname]
-    if not db?
-        return
-    db.destroy()
-    delete syncdbs[fname]
-    ReactDOM.unmountComponentAtNode(dom_node)
-    # It is *critical* to first unmount the store, then the actions,
-    # or there will be a huge memory leak.
-    store = redux.getStore(fname)
-    delete store.state
-    redux.removeStore(fname)
-    redux.removeActions(fname)
+require('project_file').register_file_editor
+    ext       : 'course'
+    icon      : 'graduation-cap'
+    init      : init_redux
+    component : CourseEditor
+    remove    : remove_redux

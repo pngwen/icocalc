@@ -61,6 +61,7 @@ src/*/coverage
 # comes up when testing in that directory
 src/rethinkdb_data/
 src/dev/project/rethinkdb_data/
+src/dev/project/postgres_data/
 src/dev/project/ports/
 src/dev/public/rethinkdb_data/
 src/dev/smc/rethinkdb_data/
@@ -85,5 +86,9 @@ pids
 
 src/k8s/smc-webapp-static/image/google_analytics
 src/smc-build/smc-compute-env.html
+src/smc-build/prometheus/alertmanager.yml
 
+**/octave-workspace
+**/.cache/
 .gitignore
+postgres-env

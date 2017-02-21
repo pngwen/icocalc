@@ -1,14 +1,32 @@
+###############################################################################
+#
+# SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
+#
+#    Copyright (C) 2016, Sagemath Inc.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
 
 #---------------------------------------------------------------------------------------------------------
 # Support for using a synchronized doc as a synchronized document database
 # storing one record per line in JSON.
 #---------------------------------------------------------------------------------------------------------
 
-
 ###
 Synchronized document-oriented database, based on a synchronized string.
 ###
-
 
 ###
 For now _doc -- in the constructor of SynchronizedDB
@@ -125,6 +143,16 @@ class exports.SynchronizedDB extends EventEmitter
                 changes.push({remove:v.data})
                 delete @_data[h]
         if changes.length > 0
+            # sort moving the remove's before the inserts, so code that
+            # handles these changes gets the correct result by applying them
+            # in order (since mutate = remove and insert)
+            changes.sort (a,b) ->
+                if a.remove? and b.remove?
+                    return 0
+                else if a.remove? and b.insert?
+                    return -1
+                else if a.insert? and b.remove?
+                    return 1
             @emit("change", changes)
         if duplicate_lines
             # There was corruption involving multiple copies of the same line

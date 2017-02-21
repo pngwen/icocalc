@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2015, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -19,6 +19,8 @@
 #
 ###############################################################################
 
+require('coffee-cache')
+
 EXPERIMENTAL = false
 
 if process.env.DEVEL
@@ -28,7 +30,7 @@ if process.env.DEVEL
 
 ###
 
-id='eb5c61ae-b37c-411f-9509-10adb51eb90b';require('smc-hub/compute-client').compute_server(db_hosts:['db0'], cb:(e,s)->console.log(e);global.s=s; s.project(project_id:id,cb:(e,p)->global.p=p;cidonsole.log(e)))
+id='eb5c61ae-b37c-411f-9509-10adb51eb90b';require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e);global.s=s; s.project(project_id:id,cb:(e,p)->global.p=p;cidonsole.log(e)))
 
 Another example with database on local host
 
@@ -66,9 +68,6 @@ misc_node   = require('smc-util-node/misc_node')
 message     = require('smc-util/message')
 misc        = require('smc-util/misc')
 
-{rethinkdb} = require('./rethink')
-
-
 # Set the log level
 winston.remove(winston.transports.Console)
 winston.add(winston.transports.Console, {level: 'debug', timestamp:true, colorize:true})
@@ -96,15 +95,13 @@ On dev machine
 require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e);global.s=s)
 
 In a project (the port depends on project):
-require('smc-hub/compute-client').compute_server(db_hosts:['localhost:53739'], dev:true, cb:(e,s)->console.log(e);global.s=s)
+require('smc-hub/compute-client').compute_server(dev:true, cb:(e,s)->console.log(e);global.s=s)
 
 ###
 compute_server_cache = undefined
 exports.compute_server = compute_server = (opts) ->
     opts = defaults opts,
         database : undefined
-        db_name  : 'smc'
-        db_hosts : ['localhost']
         base_url : ''
         dev      : false          # dev -- for single-user *development*; compute server runs in same process as client on localhost
         single   : false          # single -- for single-server use/development; everything runs on a single machine.
@@ -118,8 +115,6 @@ class ComputeServerClient
     constructor: (opts) ->
         opts = defaults opts,
             database : undefined
-            db_name  : 'smc'
-            db_hosts : ['localhost']
             dev      : false
             single   : false
             base_url : ''     # base url of webserver -- passed on to local_hub so it can start servers with correct base_url
@@ -154,32 +149,20 @@ class ComputeServerClient
             @database = opts.database
             cb()
             return
-        else if opts.db_name?
-            fs.readFile "#{process.cwd()}/data/secrets/rethinkdb", (err, password) =>
-                if err
-                    winston.debug("warning: no password file -- will only work if there is no password set.")
-                    password = undefined
-                else
-                    password = password.toString().trim()
-                @database = rethinkdb
-                    hosts    : opts.db_hosts
-                    database : opts.db_name
-                    password : password
-                    pool     : 1
-                    cb       : cb
         else
-            cb("database or db_name must be specified")
+            @database = require('./postgres').db(pool:1)
+            @database.connect(cb:cb)
 
     _init_storage_servers_feed: (cb) =>
         @database.synctable
-            query : @database.table('storage_servers')
+            table : 'storage_servers'
             cb    : (err, synctable) =>
                 @storage_servers = synctable
                 cb(err)
 
     _init_compute_servers_feed: (cb) =>
         @database.synctable
-            query : @database.table('compute_servers')
+            table : 'compute_servers'
             cb    : (err, synctable) =>
                 @compute_servers = synctable
                 cb(err)
@@ -205,8 +188,12 @@ class ComputeServerClient
             cb           : required
         dbg = @dbg("add_server(#{opts.host})")
         dbg("adding compute server to the database by grabbing conf files, etc.")
+        if @_single
+            dbg("single machine server -- just copy files directly")
+            @_add_server_single(opts)
+            return
 
-        if not opts.host
+        if not opts.dc
             i = opts.host.indexOf('-')
             if i != -1
                 opts.dc = opts.host.slice(0,i)
@@ -250,6 +237,41 @@ class ComputeServerClient
                     member_host  : opts.member_host
                     cb           : cb
         ], opts.cb)
+
+    _add_server_single: (opts) =>
+        opts = defaults opts,
+            timeout : 30
+            cb      : required
+        dbg = @dbg("_add_server_single")
+        dbg("adding the compute server to the database by grabbing conf files, etc.")
+        port = secret = undefined
+        {program} = require('smc-hub/compute-server')
+        async.series([
+            (cb) =>
+                async.parallel([
+                    (cb) =>
+                        fs.readFile program.port_file, (err, x) =>
+                            if x?
+                                port = parseInt(x.toString())
+                            cb(err)
+                    (cb) =>
+                        fs.readFile program.secret_file, (err, x) =>
+                            if x?
+                                secret = x.toString().trim()
+                            cb(err)
+                ], cb)
+            (cb) =>
+                dbg("update database")
+                @database.save_compute_server
+                    host         : 'localhost'
+                    dc           : ''
+                    port         : port
+                    secret       : secret
+                    experimental : false
+                    member_host  : false
+                    cb           : cb
+        ], opts.cb)
+
 
     # Choose a host from the available compute_servers according to some
     # notion of load balancing (not really worked out yet)
@@ -309,12 +331,18 @@ class ComputeServerClient
                             return 0
                     dbg("scored host info = #{misc.to_json(([info.host,info.score] for info in v))}")
                     # finally choose one of the hosts with the highest score at random.
+                    ###
                     best_score = v[0].score
                     i = 0
                     while i < v.length and v[i].score == best_score
                         i += 1
-                    w = v.slice(0,i)
-                    opts.cb(undefined, misc.random_choice(w).host)
+                    v = v.slice(0,i)
+                    ###
+
+                    # I'm disabling this, since in practice random is probably
+                    # better than the very naive approach above, given that we sometimes
+                    # have 100+ projects created at once, and they all end up in the same place!
+                    opts.cb(undefined, misc.random_choice(v).host)
 
     remove_from_cache: (opts) =>
         opts = defaults opts,
@@ -383,12 +411,17 @@ class ComputeServerClient
         socket = undefined
         async.series([
             (cb) =>
-                dbg("getting port and secret...")
+                dbg("getting port and secret (host='#{host}')...")
                 @database.get_compute_server
                     host : host
                     cb   : (err, x) =>
                         info = x; cb(err)
             (cb) =>
+                if not info?
+                    err = "no information about host='#{host}' in database"
+                    dbg(err)
+                    cb(err)
+                    return
                 dbg("connecting to #{host}:#{info.port}...")
                 misc_node.connect_to_locked_socket
                     host    : host
@@ -577,7 +610,9 @@ class ComputeServerClient
                         for k, v of status
                             result[host][k] = v
                         # also, set in the database (don't wait on this or require success)
-                        @database.table('compute_servers').get(host).update(status:@database.r.literal(resp.status)).run()
+                        @database.set_compute_server_status
+                            host   : host
+                            status : resp.status
                     cb()
         async.map(misc.keys(result), f, (err) => opts.cb(err, result))
 
@@ -617,7 +652,7 @@ class ComputeServerClient
 
     ###
     projects = require('misc').split(fs.readFileSync('/home/salvus/work/2015-amath/projects').toString())
-    require('smc-hub/compute-client').compute_server(db_hosts:['smc0-us-central1-c'],keyspace:'salvus',cb:(e,s)->console.log(e); s.set_quotas(projects:projects, cores:4, cb:(e)->console.log("DONE",e)))
+    require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e); s.set_quotas(projects:projects, cores:4, cb:(e)->console.log("DONE",e)))
     ###
     set_quotas: (opts) =>
         opts = defaults opts,
@@ -644,7 +679,7 @@ class ComputeServerClient
 
     ###
     projects = require('misc').split(fs.readFileSync('/home/salvus/tmp/projects').toString())
-    require('smc-hub/compute-client').compute_server(db_hosts:['db0'], cb:(e,s)->console.log(e); s.move(projects:projects, target:'compute5-us', cb:(e)->console.log("DONE",e)))
+    require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e); s.move(projects:projects, target:'compute5-us', cb:(e)->console.log("DONE",e)))
 
     s.move(projects:projects, target:'compute4-us', cb:(e)->console.log("DONE",e))
     ###
@@ -665,7 +700,7 @@ class ComputeServerClient
                     project.move(target: opts.target, cb:cb)
         async.mapLimit(projects, opts.limit, f, cb)
 
-    # x={};require('smc-hub/compute-client').compute_server(db_hosts:['smc0-us-central1-c'], cb:(e,s)->console.log(e);x.s=s;x.s.tar_backup_recent(max_age_h:1, cb:(e)->console.log("DONE",e)))
+    # x={};require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e);x.s=s;x.s.tar_backup_recent(max_age_h:1, cb:(e)->console.log("DONE",e)))
     tar_backup_recent: (opts) =>
         opts = defaults opts,
             max_age_h : required
@@ -725,7 +760,7 @@ class ComputeServerClient
     # have not been touched in at least the given number of days.  For each such project,
     # stop it, save it, and close it (deleting files off compute server).  This should be
     # run periodically as a maintenance operation to free up disk space on compute servers.
-    #   require('smc-hub/compute-client').compute_server(db_hosts:['db0'], cb:(e,s)->console.log(e);global.s=s)
+    #   require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e);global.s=s)
     #   s.close_open_unused_projects(dry_run:false, min_age_days:120, max_age_days:180, threads:5, host:'compute0-us', cb:(e,x)->console.log("TOTALLY DONE!!!",e))
     close_open_unused_projects: (opts) =>
         opts = defaults opts,
@@ -736,7 +771,7 @@ class ComputeServerClient
             dry_run      : false       # if true, just explain what would get deleted, but don't actually do anything.
             limit        : undefined   # if given, do this many of the closes, then just stop (use to test before going full on)
             cb           : required
-        dbg = @dbg("close_unused_projects")
+        dbg = @dbg("close_open_unused_projects")
         target = undefined
         async.series([
             (cb) =>
@@ -786,7 +821,12 @@ class ComputeServerClient
                                         # see if project is really not closed
                                         project.state
                                             cb : (err, s) =>
-                                                state = s?.state; cb(err)
+                                                if err
+                                                    err = "error computing state -- #{err}"
+                                                    cb(err)
+                                                else
+                                                    state = s?.state
+                                                    cb()
                                     (cb) =>
                                         if state == 'closed'
                                             cb(); return
@@ -882,13 +922,19 @@ class ProjectClient extends EventEmitter
         @host = @assigned = @_state = @_state_time =  @_state_error = undefined
         @_stale = true
         db = @compute_server.database
-        # It's *critical* that idle_timeout_s be used below, since I haven't come up with any
-        # good way to "garbage collect" ProjectClient objects, due to the async complexity of
-        # everything.
+        # It's *critical* that idle_timeout_s be used below, since I haven't
+        # come up with any good way to "garbage collect" ProjectClient objects,
+        # due to the async complexity of everything.
+        # ** TODO: IMPORTANT - idle_timeout_s is NOT IMPLEMENTED in postgres-synctable yet! **
         db.synctable
-            idle_timeout_s : 60*10    # 10 minutes -- should be long enough for any single operation; but short enough that connections get freed up.
-            query : db.table('projects').getAll(@project_id).pluck('project_id', 'host', 'state', 'storage', 'storage_request')
-            cb    : (err, x) =>
+            idle_timeout_s : 60*10    # 10 minutes -- should be long enough for any single operation;
+                                      # but short enough that connections get freed up.
+            table          : 'projects'
+            columns        : ['project_id', 'host', 'state', 'storage', 'storage_request']
+            where          : {"project_id = $::UUID" : @project_id}
+            where_function : (project_id) =>
+                return project_id == @project_id  # fast easy test for matching
+            cb             : (err, x) =>
                 if err
                     dbg("error initializing synctable -- #{err}")
                     cb(err)
@@ -1036,7 +1082,7 @@ class ProjectClient extends EventEmitter
         @compute_server.database.set_project_state(opts)
 
     ###
-    id='20257d4e-387c-4b94-a987-5d89a3149a00'; require('smc-hub/compute-client').compute_server(db_hosts:['db0'], cb:(e,s)->console.log(e);global.s=s;s.project(project_id:id, cb:(e,p)->console.log(e);global.p=p; p.state(cb:console.log)))
+    id='20257d4e-387c-4b94-a987-5d89a3149a00'; require('smc-hub/compute-client').compute_server(cb:(e,s)->console.log(e);global.s=s;s.project(project_id:id, cb:(e,p)->console.log(e);global.p=p; p.state(cb:console.log)))
     ###
 
     state: (opts) =>
@@ -1094,9 +1140,10 @@ class ProjectClient extends EventEmitter
         if opts.force or not @_state_time? or new Date() - (@_last_state_update ? 0) >= 1000*STATE_UPDATE_INTERVAL_S
             dbg("calling remote compute server for state")
             @_action
-                action : "state"
-                args   : if opts.update then ['--update']
-                cb     : (err, resp) =>
+                action  : "state"
+                args    : if opts.update then ['--update']
+                timeout : 60
+                cb      : (err, resp) =>
                     @_last_state_update = new Date()
                     if err
                         dbg("problem getting state -- #{err}")
@@ -1142,7 +1189,10 @@ class ProjectClient extends EventEmitter
                             if not err
                                 status = s
                                 # save status in database
-                                @compute_server.database.table('projects').get(@project_id).update(status:status).run(cb)
+                                @compute_server.database.set_project_status
+                                    project_id : @project_id
+                                    status     : status
+                                    cb         : cb
                             else
                                 cb(err)
                 # we retry getting status with exponential backoff until we hit max_time, which
@@ -1199,10 +1249,7 @@ class ProjectClient extends EventEmitter
         dbg = @dbg("open")
         dbg()
         if @_dev or @_single
-            if @_dev
-                host = 'localhost'
-            else
-                host = os.hostname()
+            host = 'localhost'
             async.series([
                 (cb) =>
                     if not @host
@@ -1897,7 +1944,13 @@ class ProjectClient extends EventEmitter
                         args.push("--hidden")
                     if opts.time
                         args.push("--time")
-                    for k in ['path', 'start', 'limit']
+                    # prefix relative paths with ./ such that names starting with a dash do not confuse parsing arguments
+                    args.push("--path")
+                    if opts.path[0] isnt '/'
+                        args.push("./#{opts.path}")
+                    else
+                        args.push(opts.path)
+                    for k in ['start', 'limit']
                         args.push("--#{k}"); args.push(opts[k])
                     dbg("get listing of files using options #{misc.to_safe_str(args)}")
                     @_action

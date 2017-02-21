@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2015, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -23,8 +23,9 @@
 # Help Page
 ###
 
+$ = window.$
 
-{React, ReactDOM, redux, Redux, rtypes, rclass} = require('./smc-react')
+{React, ReactDOM, redux, rtypes, rclass} = require('./smc-react')
 
 {Well, Col, Row, Accordion, Panel, ProgressBar} = require('react-bootstrap')
 
@@ -45,7 +46,7 @@ li_style =
     lineHeight : 'inherit'
     marginTop  : '0.7ex'
 
-HelpPageUsageSection = rclass
+exports.HelpPageUsageSection = HelpPageUsageSection = rclass
     reduxProps :
         server_stats :
             loading             : rtypes.bool.isRequired
@@ -56,81 +57,81 @@ HelpPageUsageSection = rclass
             accounts_created    : rtypes.object # {RECENT_TIMES.key → number, ...}
             projects_created    : rtypes.object # {RECENT_TIMES.key → number, ...}
             projects_edited     : rtypes.object # {RECENT_TIMES.key → number, ...}
-            active_projects     : rtypes.number # deprecated
-            last_hour_projects  : rtypes.number # deprecated
-            last_day_projects   : rtypes.number # deprecated
-            last_week_projects  : rtypes.number # deprecated
-            last_month_projects : rtypes.number # deprecated
 
     displayName : 'HelpPage-HelpPageUsageSection'
 
-    getDefaultProps : ->
+    getDefaultProps: ->
        loading : true
 
-    number_of_clients : ->
+    number_of_active_users: ->
         if @props.hub_servers.length == 0
             0
         else
-            (x['clients'] for x in @props.hub_servers).reduce((s,t) -> s+t)
+            (x.clients for x in @props.hub_servers).reduce((s,t) -> s+t)
 
-    render_signed_in_stats : ->
+    render_active_users_stats: ->
         if @props.loading
             <li style={li_style}> Live server stats <Loading /> </li>
         else
-            n = @number_of_clients()
-            <ProgressBar now={Math.max(n / 6 , 45 / 8) } label={"#{n} connected users"} />
+            n = @number_of_active_users()
+            <ProgressBar style={marginBottom:0} now={Math.max(n / 12 , 45 / 8) } label={"#{n} connected users"} />
 
     render_active_projects_stats: ->
-        n = @props.projects_edited?[RECENT_TIMES_KEY.active] ? @props.active_projects
+        n = @props.projects_edited?[RECENT_TIMES_KEY.active]
         <ProgressBar now={Math.max(n / 3, 60 / 2)} label={"#{n} projects being edited"} />
 
-    render_recent_usage_stats : ->
+    render_recent_usage_stats: ->
         if not @props.loading
             <li style={li_style}>
                 Users modified
                 <strong> {@props.projects_edited?[RECENT_TIMES_KEY.last_hour]  ? @props.last_hour_projects} projects</strong> in the last hour,
                 <strong> {@props.projects_edited?[RECENT_TIMES_KEY.last_day]   ? @props.last_day_projects} projects</strong> in the last day,
                 <strong> {@props.projects_edited?[RECENT_TIMES_KEY.last_week]  ? @props.last_week_projects} projects</strong> in the last week and
-                <strong> {@props.projects_edited?[RECENT_TIMES_KEY.last_month] ? @props.last_month_projects} projects</strong> in the last month
+                <strong> {@props.projects_edited?[RECENT_TIMES_KEY.last_month] ? @props.last_month_projects} projects</strong> in the last month.
+                <Space/> <a target='_blank' href='https://cloud.sagemath.com/7561f68d-3d97-4530-b97e-68af2fb4ed13/raw/stats.html'>
+                <Icon name='line-chart' fixedWidth /> More data...
+                </a>
             </li>
 
-    render_historical_usage : ->
-        <li key='usage_data' style={li_style}>
-            <a target='_blank' href='https://cloud.sagemath.com/7561f68d-3d97-4530-b97e-68af2fb4ed13/raw/stats.html'>
-                <Icon name='line-chart' fixedWidth />Historical usage statistics
-            </a> &mdash; number of projects and users over time
-        </li>
-
-    render_historical_metrics : ->
+    render_historical_metrics: ->
+        return  # disabled, due to being broken...
         <li key='usage_metrics' style={li_style}>
             <a target='_blank' href='https://cloud.sagemath.com/b97f6266-fe6f-4b40-bd88-9798994a04d1/raw/metrics/metrics.html'>
                 <Icon name='area-chart' fixedWidth />Historical system metrics
             </a> &mdash; CPU usage, running projects and software instances, etc
         </li>
 
-    render_when_updated : ->
+    render_when_updated: ->
         if @props.time
             <span style={fontSize: '9pt', marginLeft: '20px', color: '#666'}>
                 updated <TimeAgo date={new Date(@props.time)} />
             </span>
 
-    render : ->
+    render: ->
         <div>
             <h3>
-                <Icon name='dashboard' /> System usage
+                <Icon name='dashboard' /> Current connected users
                 {@render_when_updated()}
             </h3>
             <ul>
-                {@render_signed_in_stats()}
-                {@render_active_projects_stats()}
+                {@render_active_users_stats()}
+                {# @render_active_projects_stats()}
                 {@render_recent_usage_stats()}
-                {@render_historical_usage()}
                 {@render_historical_metrics()}
             </ul>
         </div>
 
 
 SUPPORT_LINKS =
+    frequently_asked_questions :
+        icon : 'question-circle'
+        href : 'https://github.com/sagemathinc/smc/wiki/Portal'
+        link : 'SageMathCloud documentation'
+    pricing :
+        icon : 'money'
+        href : PolicyPricingPageUrl
+        link : 'Pricing and subscription options'
+        commercial: true
     # commented out since link doesn't work
     #getting_started :
     #    icon : 'play'
@@ -150,10 +151,6 @@ SUPPORT_LINKS =
         icon : 'comments-o'
         href : 'https://gitter.im/sagemath/cloud'
         link : 'Realtime chat and help'
-    frequently_asked_questions :
-        icon : 'question-circle'
-        href : 'https://github.com/sagemathinc/smc/wiki/Portal'
-        link : 'Wiki portal for help and FAQ'
     # removed since none of us SMC devs use ask.sagemath these days
     #quick_question :
     #    icon : 'question-circle'
@@ -162,12 +159,11 @@ SUPPORT_LINKS =
     github :
         icon : 'github-square'
         href : 'https://github.com/sagemathinc/smc'
-        link : 'Complete source code'
-        text : <span>(SageMathCloud is 100% open source)</span>
+        link : 'SageMathCloud source code'
     github_issue_tracker :
         icon : 'exclamation-circle'
-        href : 'https://github.com/sagemathinc/smc/issues'
-        link : 'Github issue tracker'
+        href : 'https://github.com/sagemathinc/smc/issues?utf8=%E2%9C%93&q=is%3Aissue%20is%3Aopen%20label%3AI-bug%20sort%3Acreated-asc%20-label%3Ablocked'
+        link : 'Known bugs in SageMathCloud'
     support_mailing_list :
         icon : 'life-ring'
         href : 'https://groups.google.com/forum/?fromgroups#!forum/sage-cloud'
@@ -210,15 +206,18 @@ HelpPageSupportSection = rclass
     propTypes :
         support_links : rtypes.object
 
-    get_support_links : ->
+    get_support_links: ->
+        {commercial} = require('./customize')
         for name, data of @props.support_links
+            if data.commercial and not commercial
+                continue
             <li key={name} style={li_style} className={if data.className? then data.className}>
                 <a target={if data.href.indexOf('#') != 0 then '_blank'} href={data.href}>
                     <Icon name={data.icon} fixedWidth /> {data.link}
                 </a> <span style={color:'#666'}>{data.text}</span>
             </li>
 
-    render : ->
+    render: ->
         <div>
             <h3> <Icon name='support' /> Support</h3>
             <ul>
@@ -254,13 +253,13 @@ ABOUT_SECTION =
 HelpPageAboutSection = rclass
     displayName : 'HelpPage-HelpPageAboutSection'
 
-    get_about_section : ->
+    get_about_section: ->
         for name, item of ABOUT_SECTION
             <li key={name} style={li_style}>
                 {item}
             </li>
 
-    render : ->
+    render: ->
         <div>
             <h3> <Icon name='info-circle' /> About </h3>
             <ul>
@@ -271,22 +270,22 @@ HelpPageAboutSection = rclass
 HelpPageGettingStartedSection = rclass
     displayName : 'Help-HelpPageGettingStartedSection'
 
-    get_panel_header : (icon, header) ->
+    get_panel_header: (icon, header) ->
         <div><Icon name={icon} fixedWidth /> {header}</div>
 
-    insert_sample_function : ->
+    insert_sample_function: ->
         '$J_\\alpha(x) = \\sum\\limits_{m=0}^\\infty \\frac{(-1)^m}{m! \\, \\Gamma(m + \\alpha + 1)}{\\left({\\frac{x}{2}}\\right)}^{2 m + \\alpha}$'
 
-    componentDidMount : ->
+    componentDidMount: ->
         @update_mathjax()
 
-    componentDidUpdate : ->
+    componentDidUpdate: ->
         @update_mathjax()
 
     update_mathjax: ->
         $(ReactDOM.findDOMNode(@)).mathjax()
 
-    render : ->
+    render: ->
         <div>
             <h3 id='help-page-getting-started'><Icon name='cubes' /> Getting started with <SiteName/></h3>
 
@@ -478,14 +477,17 @@ HelpPageGettingStartedSection = rclass
 exports.HelpPage = HelpPage = rclass
     displayName : 'HelpPage'
 
-    render : ->
-        <Row>
+    render: ->
+        {SmcWikiUrl} = require('./customize')
+        <Row style={padding:'10px', margin:'0px'}>
             <Col sm=10 smOffset=1 md=8 mdOffset=2 xs=12>
                 <div style={backgroundColor: 'white', padding: '15px', border: '1px solid lightgrey', borderRadius: '5px', margin:'auto', width:'100%', fontSize: '110%', textAlign: 'center'}>
                     <hr/>
                     <Icon name='envelope'/><Space/><Space/> If you encounter problems, please email <HelpEmailLink />.
                     <br/>
                     In such an email, please include the URL link to the relevant project or file.
+                    <hr/>
+                    <a href="#{SmcWikiUrl}" target="_blank">The SageMathCloud Documentation</a>
                 </div>
 
                 <h3>
@@ -499,11 +501,9 @@ exports.HelpPage = HelpPage = rclass
 
                 <HelpPageSupportSection support_links={SUPPORT_LINKS} />
 
-                <Redux redux={redux}>
-                    <HelpPageUsageSection />
-                </Redux>
+                <HelpPageUsageSection />
 
-                <HelpPageAboutSection />
+                {<HelpPageAboutSection /> if require('./customize').commercial}
 
                 <HelpPageGettingStartedSection />
             </Col>
@@ -512,12 +512,6 @@ exports.HelpPage = HelpPage = rclass
                 <Footer/>
             </Col>
         </Row>
-
-exports.render_help_page = () ->
-    ReactDOM.render(<HelpPage />, document.getElementById('salvus-help'))
-    # also setup a listener for switching to the page. (TODO: temporary until react-router...)
-    require('./top_navbar').top_navbar.on "switch_to_page-salvus-help", () ->
-        window.history.pushState("", "", window.smc_base_url + '/help')
 
 exports._test =
     HelpPageSupportSection : HelpPageSupportSection

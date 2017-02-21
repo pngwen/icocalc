@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2014, William Stein
+#    Copyright (C) 2014 -- 2016, SageMath, Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 ##########################################################################
 #
 ###############################################################################
-# Copyright (c) 2013, William Stein
+# Copyright (C) 2016, Sagemath Inc.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -267,7 +267,6 @@ exports.uuidsha1 = (data) ->
                 return ((parseInt('0x'+s[i],16)&0x3)|0x8).toString(16)
     )
 
-
 zipcode = new RegExp("^\\d{5}(-\\d{4})?$")
 exports.is_valid_zipcode = (zip) -> zipcode.test(zip)
 
@@ -312,10 +311,10 @@ exports.to_safe_str = (x) ->
     x = exports.to_json(obj)
 
 # convert from a JSON string to Javascript (properly dealing with ISO dates)
+#   e.g.,   2016-12-12T02:12:03.239Z    and    2016-12-12T02:02:53.358752
 reISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d*))(?:Z|(\+|-)([\d|:]*))?$/
 date_parser = (k, v) ->
-    # TODO shouldn't be the length 26?
-    if typeof(v) == 'string' and v.length == 24 and reISO.exec(v)
+    if typeof(v) == 'string' and v.length >= 20 and reISO.exec(v)
         return new Date(v)
     else
         return v
@@ -326,6 +325,23 @@ exports.from_json = (x) ->
     catch err
         console.debug("from_json: error parsing #{x} (=#{exports.to_json(x)}) from JSON")
         throw err
+
+# Returns modified version of obj with any string
+# that look like ISO dates to actual Date objects.  This mutates
+# obj in place as part of the process.
+exports.fix_json_dates = fix_json_dates = (obj) ->
+    if exports.is_object(obj)
+        for k, v of obj
+            if typeof(v) == 'object'
+                fix_json_dates(v)
+            else if typeof(v) == 'string' and v.length >= 20 and reISO.exec(v)
+                obj[k] = new Date(v)
+    else if exports.is_array(obj)
+        for i, x of obj
+            obj[i] = fix_json_dates(x)
+    else if typeof(obj) == 'string' and obj.length >= 20 and reISO.exec(obj)
+        return new Date(obj)
+    return obj
 
 # converts a Date object to an ISO string in UTC.
 # NOTE -- we remove the +0000 (or whatever) timezone offset, since *all* machines within
@@ -403,6 +419,7 @@ exports.min = (array) -> (array.reduce((a,b) -> Math.min(a, b)))
 
 filename_extension_re = /(?:\.([^.]+))?$/
 exports.filename_extension = (filename) ->
+    filename = exports.path_split(filename).tail
     return filename_extension_re.exec(filename)[1] ? ''
 
 exports.filename_extension_notilde = (filename) ->
@@ -410,6 +427,20 @@ exports.filename_extension_notilde = (filename) ->
     while ext and ext[ext.length-1] == '~'  # strip tildes from the end of the extension -- put there by rsync --backup, and other backup systems in UNIX.
         ext = ext.slice(0, ext.length-1)
     return ext
+
+# If input name foo.bar, returns object {name:'foo', ext:'bar'}.
+# If there is no . in input name, returns {name:name, ext:''}
+exports.separate_file_extension = (name) ->
+    ext  = exports.filename_extension(name)
+    if ext isnt ''
+        name = name[0...name.length - ext.length - 1] # remove the ext and the .
+    return {name: name, ext: ext}
+
+# change the filename's extension to the new one.
+# if there is no extension, add it.
+exports.change_filename_extension = (name, new_ext) ->
+    {name, ext} = exports.separate_file_extension(name)
+    return "#{name}.#{new_ext}"
 
 # shallow copy of a map
 exports.copy = (obj) ->
@@ -458,10 +489,13 @@ exports.deep_copy = (obj) ->
         flags += 'y' if obj.sticky?
         return new RegExp(obj.source, flags)
 
-    newInstance = new obj.constructor()
+    try
+        newInstance = new obj.constructor()
+    catch
+        newInstance = {}
 
-    for key of obj
-        newInstance[key] = exports.deep_copy(obj[key])
+    for key, val of obj
+        newInstance[key] = exports.deep_copy(val)
 
     return newInstance
 
@@ -479,6 +513,8 @@ exports.path_to_file = (path, file) ->
     return path + '/' + file
 
 exports.meta_file = (path, ext) ->
+    if not path?
+        return
     p = exports.path_split(path)
     path = p.head
     if p.head != ''
@@ -502,35 +538,37 @@ exports.original_path = (path) ->
         x = s.head + '/' + x
     return x
 
-
-# "foobar" --> "foo..."
+ELLIPSES = "…"
+# "foobar" --> "foo…"
 exports.trunc = (s, max_length=1024) ->
     if not s?
         return s
     if s.length > max_length
-        if max_length < 3
-            throw new Error("ValueError: max_length must be >= 3")
-        return s.slice(0,max_length-3) + "..."
+        if max_length < 1
+            throw new Error("ValueError: max_length must be >= 1")
+        return s.slice(0,max_length-1) + ELLIPSES
     else
         return s
 
-# "foobar" --> "fo...ar"
+# "foobar" --> "fo…ar"
 exports.trunc_middle = (s, max_length=1024) ->
     if not s?
         return s
     if s.length <= max_length
         return s
+    if max_length < 1
+        throw new Error("ValueError: max_length must be >= 1")
     n = Math.floor(max_length/2)
-    return s.slice(0, n - 2 + (if max_length%2 then 1 else 0)) + '...' + s.slice(s.length-(n-1))
+    return s.slice(0, n - 1 + (if max_length%2 then 1 else 0)) + ELLIPSES + s.slice(s.length-n)
 
-# "foobar" --> "...bar"
+# "foobar" --> "…bar"
 exports.trunc_left = (s, max_length=1024) ->
     if not s?
         return s
     if s.length > max_length
-        if max_length < 3
-            throw new Error("ValueError: max_length must be >= 3")
-        return "..." + s.slice(s.length-max_length+3)
+        if max_length < 1
+            throw new Error("ValueError: max_length must be >= 1")
+        return ELLIPSES + s.slice(s.length-max_length+1)
     else
         return s
 
@@ -552,7 +590,7 @@ exports.pad_right = (s, n) ->
 exports.plural = (number, singular, plural="#{singular}s") ->
     if singular in ['GB', 'MB']
         return singular
-    if number is 1 then singular else plural
+    if number == 1 then singular else plural
 
 
 exports.git_author = (first_name, last_name, email_address) -> "#{first_name} #{last_name} <#{email_address}>"
@@ -688,6 +726,9 @@ exports.retry_until_success = (opts) ->
                 opts.log("retry_until_success(#{opts.name}) -- try #{tries}")
         opts.f (err)->
             if err
+                if err == "not_public"
+                    opts.cb?("not_public")
+                    return
                 if err and opts.warn?
                     opts.warn("retry_until_success(#{opts.name}) -- err=#{err}")
                 if opts.log?
@@ -860,7 +901,7 @@ exports.async_debounce = (opts) ->
     if cb?
         callbacks.push(cb)
     # Reset next callbacks
-    state.next_callbacks = []
+    delete state.next_callbacks
     #console.log("doing run with #{callbacks.length} callbacks")
 
     f (err) =>
@@ -870,8 +911,8 @@ exports.async_debounce = (opts) ->
             cb?(err)
         callbacks = []  # ensure these callbacks don't get called again
         #console.log("finished -- have state.next_callbacks of length #{state.next_callbacks.length}")
-        if state.next_callbacks.length > 0 and not state.timer?
-            # new cb requests came in since when we started, so call when we next can.
+        if state.next_callbacks? and not state.timer?
+            # new calls came in since when we started, so call when we next can.
             #console.log("new callbacks came in #{state.next_callbacks.length}")
             call_again()
 
@@ -1046,23 +1087,32 @@ exports.parse_mathjax = (t) ->
         return v
     i = 0
     while i < t.length
-        if t.slice(i,i+2) == '\\$'
+        # escaped dollar sign, ignored
+        if t.slice(i, i+2) == '\\$'
             i += 2
             continue
         for d in mathjax_delim
             contains_linebreak = false
-            if t.slice(i,i+d[0].length) == d[0]
+            # start of a formula detected
+            if t.slice(i, i + d[0].length) == d[0]
                 # a match -- find the close
                 j = i+1
-                while j < t.length and t.slice(j,j+d[1].length) != d[1]
-                    if t.slice(j, j+1) == "\n"
+                while j < t.length and t.slice(j, j + d[1].length) != d[1]
+                    next_char = t.slice(j, j+1)
+                    if next_char == "\n"
                         contains_linebreak = true
                         if d[0] == "$"
                             break
+                    # deal with ending ` char in markdown (mathjax doesn't stop there)
+                    prev_char = t.slice(j-1, j)
+                    if next_char == "`" and prev_char != '\\' # implicitly also covers "```"
+                        j -= 1 # backtrack one step
+                        break
                     j += 1
                 j += d[1].length
                 # filter out the case, where there is just one $ in one line (e.g. command line, USD, ...)
-                if !(d[0] == "$" and contains_linebreak)
+                at_end_of_string = j >= t.length
+                if !(d[0] == "$" and (contains_linebreak or at_end_of_string))
                     v.push([i,j])
                 i = j
                 break
@@ -1174,6 +1224,9 @@ exports.timestamp_cmp = (a,b,field='timestamp') ->
 
 timestamp_cmp0 = (a,b,field='timestamp') ->
     return exports.cmp_Date(a[field], b[field])
+
+exports.field_cmp = (field) ->
+    return (a, b) -> exports.cmp(a[field], b[field])
 
 #####################
 # temporary location for activity_log code, shared by front and backend.
@@ -1301,9 +1354,22 @@ exports.capitalize = (s) ->
         return s.charAt(0).toUpperCase() + s.slice(1)
 
 exports.is_array = is_array = (obj) ->
-    Object.prototype.toString.call(obj) == "[object Array]"
+    return Object.prototype.toString.call(obj) == "[object Array]"
 
-exports.is_date = (obj) -> obj instanceof Date
+exports.is_integer = Number.isInteger
+if not exports.is_integer?
+    exports.is_integer = (n) -> typeof(n)=='number' and (n % 1) == 0
+
+exports.is_string = (obj) ->
+    return typeof(obj) == 'string'
+
+# An object -- this is more constraining that typeof(obj) == 'object', e.g., it does
+# NOT include Date.
+exports.is_object = is_object = (obj) ->
+    return Object.prototype.toString.call(obj) == "[object Object]"
+
+exports.is_date = is_date = (obj) ->
+    return obj instanceof Date
 
 # get a subarray of all values between the two given values inclusive, provided in either order
 exports.get_array_range = (arr, value1, value2) ->
@@ -1323,11 +1389,11 @@ exports.days_ago         = (d)  -> exports.hours_ago(24*d)
 exports.weeks_ago        = (w)  -> exports.days_ago(7*w)
 exports.months_ago       = (m)  -> exports.days_ago(30.5*m)
 
-if localStorage?
-    # Versions of the above, but give the relevant point in time but
+if window?
+    # BROWSER Versions of the above, but give the relevant point in time but
     # on the *server*.  These are only available in the web browser.
-    exports.server_time             = ()   -> new Date(new Date() - (parseFloat(localStorage.clock_skew) ? 0))
-    exports.server_milliseconds_ago = (ms) -> new Date(new Date() - ms - (parseFloat(localStorage.clock_skew) ? 0))
+    exports.server_time             = ()   -> new Date(new Date() - parseFloat(exports.get_local_storage('clock_skew') ? 0))
+    exports.server_milliseconds_ago = (ms) -> new Date(new Date() - ms - parseFloat(exports.get_local_storage('clock_skew') ? 0))
     exports.server_seconds_ago      = (s)  -> exports.server_milliseconds_ago(1000*s)
     exports.server_minutes_ago      = (m)  -> exports.server_seconds_ago(60*m)
     exports.server_hours_ago        = (h)  -> exports.server_minutes_ago(60*h)
@@ -1441,10 +1507,15 @@ exports.map_diff = (a, b) ->
     return c
 
 # limit the values in a by the values of b
+# or just by b if b is a number
 exports.map_limit = (a, b) ->
     c = {}
-    for k, v of a
-        c[k] = Math.min(v, (b[k] ? Number.MAX_VALUE))
+    if typeof b == 'number'
+        for k, v of a
+            c[k] = Math.min(v, b)
+    else
+        for k, v of a
+            c[k] = Math.min(v, (b[k] ? Number.MAX_VALUE))
     return c
 
 # arithmetic sum of an array
@@ -1487,8 +1558,15 @@ exports.map_without_undefined = map_without_undefined = (map) ->
         if not v?
             continue
         else
-            new_map[k] = if typeof(v) == 'object' then map_without_undefined(v) else v
+            new_map[k] = if is_object(v) then map_without_undefined(v) else v
     return new_map
+
+exports.map_mutate_out_undefined = (map) ->
+    for k, v of map
+        if not v?
+            delete map[k]
+
+
 
 # foreground; otherwise, return false.
 exports.should_open_in_foreground = (e) ->
@@ -1574,16 +1652,32 @@ exports.history_path = (path) ->
     return if p.head then "#{p.head}/.#{p.tail}.sage-history" else ".#{p.tail}.sage-history"
 
 # This is a convenience function to provide as a callback when working interactively.
-exports.done = () ->
+_done = (n, args...) ->
     start_time = new Date()
-    return (args...) ->
-        try
-            s = JSON.stringify(args)
-        catch
-            s = args
-        console.log("*** TOTALLY DONE! (#{(new Date() - start_time)/1000}s since start) ", s)
+    f = (args...) ->
+        if n != 1
+            try
+                args = [JSON.stringify(args, null, n)]
+            catch
+                # do nothing
+        console.log("*** TOTALLY DONE! (#{(new Date() - start_time)/1000}s since start) ", args...)
+    if args.length > 0
+        f(args...)
+    else
+        return f
+
+exports.done = (args...) -> _done(0, args...)
+exports.done1 = (args...) -> _done(1, args...)
+exports.done2 = (args...) -> _done(2, args...)
+
 
 smc_logger_timestamp = smc_logger_timestamp_last = smc_start_time = new Date().getTime() / 1000.0
+
+exports.get_start_time_ts = ->
+    return new Date(smc_start_time * 1000)
+
+exports.get_uptime = ->
+    return seconds2hms((new Date().getTime() / 1000.0) - smc_start_time)
 
 exports.log = () ->
     smc_logger_timestamp = new Date().getTime() / 1000.0
@@ -1599,9 +1693,14 @@ exports.log = () ->
         console.log_original(prompt, msg, args...)
     smc_logger_timestamp_last = smc_logger_timestamp
 
-if not exports.RUNNING_IN_NODE and window?
-    window.console.log_original = window.console.log
-    window.console.log = exports.log
+exports.wrap_log = () ->
+    if not exports.RUNNING_IN_NODE and window?
+        window.console.log_original = window.console.log
+        window.console.log = exports.log
+
+# to test exception handling
+exports.this_fails = ->
+    return exports.op_to_function('noop')
 
 # derive the console initialization filename from the console's filename
 # used in webapp and console_server_child
@@ -1611,7 +1710,6 @@ exports.console_init_filename = (fn) ->
     if x.head == ''
         return x.tail
     return [x.head, x.tail].join("/")
-
 
 exports.has_null_leaf = has_null_leaf = (obj) ->
     for k, v of obj
@@ -1660,3 +1758,234 @@ exports.peer_grading_demo = (S = 10, N = 2) ->
 # converts ticket number to support ticket url (currently zendesk)
 exports.ticket_id_to_ticket_url = (tid) ->
     return "https://sagemathcloud.zendesk.com/requests/#{tid}"
+
+# Apply various transformations to url's before downloading a file using the "+ New" from web thing:
+# This is useful, since people often post a link to a page that *hosts* raw content, but isn't raw
+# content, e.g., ipython nbviewer, trac patches, github source files (or repos?), etc.
+
+exports.transform_get_url = (url) ->  # returns something like {command:'wget', args:['http://...']}
+    URL_TRANSFORMS =
+        'http://trac.sagemath.org/attachment/ticket/':'http://trac.sagemath.org/raw-attachment/ticket/'
+        'http://nbviewer.ipython.org/urls/':'https://'
+    if exports.startswith(url, "https://github.com/") and url.indexOf('/blob/') != -1
+        url = url.replace("https://github.com", "https://raw.github.com").replace("/blob/","/")
+
+    if exports.startswith(url, 'git@github.com:')
+        command = 'git'  # kind of useless due to host keys...
+        args = ['clone', url]
+    else if url.slice(url.length-4) == ".git"
+        command = 'git'
+        args = ['clone', url]
+    else
+        # fall back
+        for a,b of URL_TRANSFORMS
+            url = url.replace(a,b)  # only replaces first instance, unlike python.  ok for us.
+        command = 'wget'
+        args = [url]
+
+    return {command:command, args:args}
+
+exports.ensure_bound = (x, min, max) ->
+    return min if x < min
+    return max if x > max
+    return x
+
+# convert a file path to the "name" of the underlying editor tab.
+# needed because otherwise filenames like 'log' would cause problems
+exports.path_to_tab = (name) ->
+    "editor-#{name}"
+
+# assumes a valid editor tab name...
+# If invalid or undefined, returns undefined
+exports.tab_to_path = (name) ->
+    if name? and name.substring(0, 7) == "editor-"
+        name.substring(7)
+
+# suggest a new filename when duplicating it
+# 1. strip extension, split at '_' or '-' if it exists
+# try to parse a number, if it works, increment it, etc.
+exports.suggest_duplicate_filename = (name) ->
+    {name, ext} = exports.separate_file_extension(name)
+    idx_dash = name.lastIndexOf('-')
+    idx_under = name.lastIndexOf('_')
+    idx = exports.max([idx_dash, idx_under])
+    new_name = null
+    if idx > 0
+        [prfx, ending] = [name[...idx+1], name[idx+1...]]
+        num = parseInt(ending)
+        if not Number.isNaN(num)
+            new_name = "#{prfx}#{num+1}"
+    new_name ?= "#{name}-1"
+    if ext?.length > 0
+        new_name += ".#{ext}"
+    return new_name
+
+
+# Wrapper around localStorage, so we can safely touch it without raising an
+# exception if it is banned (like in some browser modes) or doesn't exist.
+# See https://github.com/sagemathinc/smc/issues/237
+
+exports.set_local_storage = (key, val) ->
+    try
+        localStorage[key] = val
+    catch e
+        console.warn("localStorage set error -- #{e}")
+
+exports.get_local_storage = (key) ->
+    try
+        return localStorage[key]
+    catch e
+        console.warn("localStorage get error -- #{e}")
+
+
+exports.delete_local_storage = (key) ->
+    try
+        delete localStorage[key]
+    catch e
+        console.warn("localStorage delete error -- #{e}")
+
+
+exports.has_local_storage = () ->
+    try
+        TEST = '__smc_test__'
+        localStorage[TEST] = 'x'
+        delete localStorage[TEST]
+        return true
+    catch e
+        return false
+
+exports.local_storage_length = () ->
+    try
+        return localStorage.length
+    catch e
+        return 0
+
+# Takes an object representing a directed graph shaped as follows:
+# DAG =
+#     node1 : []
+#     node2 : ["node1"]
+#     node3 : ["node1", "node2"]
+#
+# Which represents the following graph:
+#   node1 ----> node2
+#     |           |
+#    \|/          |
+#   node3 <-------|
+#
+# Returns a topological ordering of the DAG
+#     object = ["node1", "node2", "node3"]
+#
+# Throws an error if cyclic
+# Runs in O(N + E) where N is the number of nodes and E the number of edges
+# Kahn, Arthur B. (1962), "Topological sorting of large networks", Communications of the ACM
+exports.top_sort = (DAG, opts={omit_sources:false}) ->
+    {omit_sources} = opts
+    source_names = []
+    num_edges    = 0
+    data         = {}
+
+    # Ready the data for top sort
+    for name, parents of DAG
+        data[name] ?= {}
+        node = data[name]
+        node.name = name
+        node.children ?= []
+        node.parent_set = new Set(parents)
+        for parent_name in parents
+            data[parent_name] ?= {}
+            data[parent_name].children ?= []
+            data[parent_name].children.push(node)
+        if parents.length == 0
+            source_names.push(name)
+        else
+            num_edges += parents.length
+
+    # Top sort! Non-recursive method since recursion is way slow in javascript
+    path = []
+    num_sources = source_names.length
+    while source_names.length > 0
+        curr_name = source_names.shift()
+        path.push(curr_name)
+        for child in data[curr_name].children
+            child.parent_set.delete(curr_name)
+            num_edges -= 1
+            if child.parent_set.size == 0
+                source_names.push(child.name)
+
+    # Detect lack of sources
+    if num_sources == 0
+        throw new Error "No sources were detected"
+
+    # Detect cycles
+    if num_edges != 0
+        window?._DAG = DAG  # so it's possible to debug in browser
+        throw new Error "Store has a cycle in its computed values"
+
+    if omit_sources
+        return path.slice(num_sources)
+    else
+        return path
+
+# Takes an object with keys and values where
+# the values are functions and keys are the names
+# of the functions.
+# Dependency graph is created from the property
+# `dependency_names` found on the values
+# Returns an object shaped
+# DAG =
+#     func_name1 : []
+#     func_name2 : ["func_name1"]
+#     func_name3 : ["func_name1", "func_name2"]
+#
+# Which represents the following graph:
+#   func_name1 ----> func_name2
+#     |                |
+#    \|/               |
+#   func_name3 <-------|
+exports.create_dependency_graph = (object) =>
+    DAG = {}
+    for name, written_func of object
+        DAG[name] = written_func.dependency_names ? []
+    return DAG
+
+# Binds all functions in objects of 'arr_objects' to 'scope'
+# Preserves all properties and the toString of these functions
+# Returns a new array of objects in the same order given
+# Leaves arr_objects unaltered.
+exports.bind_objects = (scope, arr_objects) ->
+    return underscore.map arr_objects, (object) =>
+        return underscore.mapObject object, (val) =>
+            if typeof val == 'function'
+                original_toString = val.toString()
+                bound_func = val.bind(scope)
+                bound_func.toString = () => original_toString
+                Object.assign(bound_func, val)
+                return bound_func
+            else
+                return val
+
+# Remove all whitespace from string s.
+# see http://stackoverflow.com/questions/6623231/remove-all-white-spaces-from-text
+exports.remove_whitespace = (s) ->
+    return s.replace(/\s/g,'')
+
+
+# ORDER MATTERS! -- this gets looped over and searches happen -- so the 1-character ops must be last.
+exports.operators = ['!=', '<>', '<=', '>=', '==', '<', '>', '=']
+
+exports.op_to_function = (op) ->
+    switch op
+        when '=', '=='
+            return (a,b) -> a == b
+        when '!=', '<>'
+            return (a,b) -> a != b
+        when '<='
+            return (a,b) -> a <= b
+        when '>='
+            return (a,b) -> a >= b
+        when '<'
+            return (a,b) -> a < b
+        when '>'
+            return (a,b) -> a > b
+        else
+            throw Error("operator must be one of '#{JSON.stringify(exports.operators)}'")

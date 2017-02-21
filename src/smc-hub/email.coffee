@@ -2,7 +2,7 @@
 #
 # SageMathCloud: collaborative mathematics
 #
-#    Copyright (C) 2015, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -89,33 +89,50 @@ exports.send_email = send_email = (opts={}) ->
                 cb(undefined, 'sendgrid email disabled -- no actual message sent')
                 return
             dbg("sending email to #{opts.to} starting...")
-            email = new email_server.Email
-                to      : opts.to
-                from    : opts.from
-                fromname: opts.fromname
-                replyto : opts.replyto
-                subject : opts.subject
-                cc      : opts.cc
-                bcc     : opts.bcc
-                html    : opts.body
+            # Sendgrid V3 API -- https://sendgrid.com/docs/API_Reference/Web_API_v3/Mail/index.html
+            helper       = sendgrid.mail
+            from_email   = new helper.Email(opts.from, opts.fromname)
+            to_email     = new helper.Email(opts.to)
+            content      = new helper.Content("text/html", opts.body)
+            mail         = new helper.Mail(from_email, opts.subject, to_email, content)
+            if opts.replyto
+                replyto_name = opts.replyto_name ? opts.replyto
+                mail.setReplyTo(new helper.Email(opts.replyto, replyto_name))
+
+            personalization = new helper.Personalization()
+            personalization.setSubject(opts.subject)
+            personalization.addTo(to_email)
+            if opts.cc
+                personalization.addCc(new helper.Email(opts.cc))
+            if opts.bcc
+                personalization.addBcc(new helper.Email(opts.bcc))
 
             # one or more strings to categorize the sent emails on sendgrid
             if opts.category?
-                email.addCategory(opts.category)
+                mail.addCategory(new helper.Category(opts.category))
 
             # to unsubscribe only from a specific type of email, not everything!
             # https://app.sendgrid.com/suppressions/advanced_suppression_manager
             if opts.asm_group?
-                email.setASMGroupID(opts.asm_group)
+                mail.setAsm(new helper.Asm(opts.asm_group))
 
             # this activates template processing
             #email.addFilter('templates', 'enable', 1)
             # plain template with a header (smc logo), a h1 title, and a footer
-            #email.addFilter('templates', 'template_id', '0375d02c-945f-4415-a611-7dc3411e2a78')
-            # This #title# will end up below the header in an <h1> according to the template
-            email.addSubstitution("#title#", opts.subject)
+            #mail.setTemplateId('0375d02c-945f-4415-a611-7dc3411e2a78')
 
-            email_server.send email, (err, res) ->
+            # This #title# will end up below the header in an <h1> according to the template
+            personalization.addSubstitution(new helper.Substitution("#title#", opts.subject))
+
+            mail.addPersonalization(personalization)
+
+            # Sendgrid V3 API
+            request = email_server.emptyRequest
+                                        method  : 'POST'
+                                        path    : '/v3/mail/send'
+                                        body    : mail.toJSON()
+
+            email_server.API request, (err, res) ->
                     dbg("sending email to #{opts.to} done...; got err=#{misc.to_json(err)} and res=#{misc.to_json(res)}")
                     if err
                         dbg("sending email -- error = #{misc.to_json(err)}")
@@ -141,7 +158,8 @@ exports.mass_email = (opts) ->
     opts = defaults opts,
         subject : required
         body    : required
-        from    : 'Robert Lowe <robert.lowe@maryvillecollege.edu>'
+        from    : 'robert.lowe@maryvillecollege.edu'
+	fromname: 'Robert Lowe'
         to      : required   # array or string (if string, opens and reads from file, splitting on whitspace)
         cc      : ''
         limit   : 10         # number to send in parallel
@@ -174,15 +192,16 @@ exports.mass_email = (opts) ->
                 n += 1
                 # asm_group https://app.sendgrid.com/suppressions/advanced_suppression_manager
                 send_email
-                    subject : opts.subject
-                    body    : opts.body
-                    from    : opts.from
-                    to      : to
-                    cc      : opts.cc
+                    subject  : opts.subject
+                    body     : opts.body
+                    from     : opts.from
+                    fromname : opts.fromname
+                    to       : to
+                    cc       : opts.cc
                     asm_group: 698
-                    category: "newsletter"
-                    verbose : false
-                    cb      : (err) ->
+                    category : "newsletter"
+                    verbose  : false
+                    cb       : (err) ->
                         if not err
                             success.push(to)
                             cb()

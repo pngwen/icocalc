@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2015, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -20,8 +20,8 @@
 
 async = require('async')
 
-{React, ReactDOM, rclass, rtypes, is_redux, is_redux_actions} = require('./smc-react')
-{Alert, Button, ButtonToolbar, Col, Input, OverlayTrigger, Popover, Tooltip, Row, Well} = require('react-bootstrap')
+{React, ReactDOM, rclass, rtypes, is_redux, is_redux_actions, redux} = require('./smc-react')
+{Alert, Button, ButtonToolbar, Checkbox, Col, FormControl, FormGroup, ControlLabel, InputGroup, OverlayTrigger, Popover, Tooltip, Row, Well} = require('react-bootstrap')
 {HelpEmailLink, SiteName, CompanyName, PricingUrl, PolicyTOSPageUrl, PolicyIndexPageUrl, PolicyPricingPageUrl} = require('./customize')
 
 # injected by webpack, but not for react-static renderings (ATTN don't assign to uppercase vars!)
@@ -109,11 +109,15 @@ exports.Icon = Icon = rclass
         inverse    : rtypes.bool
         className  : rtypes.string
         style      : rtypes.object
+        onClick    : rtypes.func
+        onMouseOver: rtypes.func
+        onMouseOut : rtypes.func
 
-    getDefaultProps : ->
-        name : 'square-o'
+    getDefaultProps: ->
+        name    : 'square-o'
+        onClick : ->
 
-    render : ->
+    render: ->
         {name, size, rotate, flip, spin, fixedWidth, stack, inverse, className, style} = @props
         # temporary until file_associations can be changed
         if name.slice(0, 3) == 'fa-'
@@ -136,7 +140,7 @@ exports.Icon = Icon = rclass
             classNames += ' fa-inverse'
         if className
             classNames += " #{className}"
-        return <i style={style} className={classNames}>{@props.children}</i>
+        return <i style={style} className={classNames} onMouseOver={@props.onMouseOver} onMouseOut={@props.onMouseOut} onClick={@props.onClick}>{@props.children}</i>
 
 # this Octicon icon class requires the CSS file in octicons/octicons/octicons.css (see landing.coffee)
 exports.Octicon = rclass
@@ -147,12 +151,12 @@ exports.Octicon = rclass
         mega   : rtypes.bool
         spin   : rtypes.bool
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         name : 'flame'
         mega : false
         spin : false
 
-    render : ->
+    render: ->
         classNames = ['octicon', "octicon-#{@props.name}"]
         if @props.spin
             classNames.push('spin-octicon')
@@ -163,13 +167,13 @@ exports.Octicon = rclass
 exports.Loading = Loading = rclass
     displayName : 'Misc-Loading'
 
-    render : ->
+    render: ->
         <span><Icon name='circle-o-notch' spin /> Loading...</span>
 
 exports.Saving = Saving = rclass
     displayName : 'Misc-Saving'
 
-    render : ->
+    render: ->
         <span><Icon name='circle-o-notch' spin /> Saving...</span>
 
 closex_style =
@@ -183,7 +187,7 @@ exports.CloseX = CloseX = rclass
         on_close : rtypes.func.isRequired
         style    : rtypes.object   # optional style for the icon itself
 
-    render :->
+    render:->
         <a href='' style={closex_style} onClick={(e)=>e.preventDefault();@props.on_close()}>
             <Icon style={@props.style} name='times' />
         </a>
@@ -201,15 +205,16 @@ exports.ErrorDisplay = ErrorDisplay = rclass
         error   : rtypes.oneOfType([rtypes.string,rtypes.object]).isRequired
         title   : rtypes.string
         style   : rtypes.object
+        bsStyle : rtypes.string
         onClose : rtypes.func       # TODO: change to on_close everywhere...?
 
-    render_close_button : ->
+    render_close_button: ->
         <CloseX on_close={@props.onClose} style={fontSize:'11pt'} />
 
     render_title: ->
         <h4>{@props.title}</h4>
 
-    render : ->
+    render: ->
         if @props.style?
             style = misc.copy(error_text_style)
             misc.merge(style, @props.style)
@@ -219,7 +224,8 @@ exports.ErrorDisplay = ErrorDisplay = rclass
             error = @props.error
         else
             error = misc.to_json(@props.error)
-        <Alert bsStyle='danger' style={style}>
+        bsStyle = @props.bsStyle ? 'danger'
+        <Alert bsStyle={bsStyle} style={style}>
             {@render_close_button() if @props.onClose?}
             {@render_title() if @props.title}
             {error}
@@ -253,7 +259,7 @@ exports.MessageDisplay = MessageDisplay = rclass
         message : rtypes.string
         onClose : rtypes.func
 
-    render : ->
+    render: ->
         <Row style={backgroundColor:'white', margin:'1ex', padding:'1ex', border:'1px solid lightgray', dropShadow:'3px 3px 3px lightgray', borderRadius:'3px'}>
             <Col md=8 xs=8>
                 <span style={color:'gray', marginRight:'1ex'}>{@props.message}</span>
@@ -274,7 +280,7 @@ exports.SelectorInput = SelectorInput = rclass
         disabled  : rtypes.bool
         #options   : array or object
 
-    render_options : ->
+    render_options: ->
         if misc.is_array(@props.options)
             if @props.options.length > 0 and typeof(@props.options[0]) == 'string'
                 i = 0
@@ -292,17 +298,18 @@ exports.SelectorInput = SelectorInput = rclass
                 display = @props.options[value]
                 <option key={value} value={value}>{display}</option>
 
-    render : ->
-        <Input
-            value        = {@props.selected}
-            defaultValue = {@props.selected}
-            type         = 'select'
-            ref          = 'input'
-            onChange     = {=>@props.on_change?(@refs.input.getValue())}
-            disabled     = {@props.disabled}
-        >
-            {@render_options()}
-        </Input>
+    render: ->
+        <FormGroup>
+            <FormControl
+                value          = {@props.selected}
+                componentClass = 'select'
+                ref            = 'input'
+                onChange       = {=>@props.on_change?(ReactDOM.findDOMNode(@refs.input).value)}
+                disabled       = {@props.disabled}
+            >
+                {@render_options()}
+            </FormControl>
+        </FormGroup>
 
 exports.TextInput = rclass
     displayName : 'Misc-TextInput'
@@ -313,29 +320,32 @@ exports.TextInput = rclass
         type : rtypes.string
         rows : rtypes.number
 
-    componentWillReceiveProps : (next_props) ->
+    componentWillReceiveProps: (next_props) ->
         if @props.text != next_props.text
             # so when the props change the state stays in sync (e.g., so save button doesn't appear, etc.)
             @setState(text : next_props.text)
 
-    getInitialState : ->
+    getInitialState: ->
         text : @props.text
 
-    saveChange : (event) ->
+    saveChange: (event) ->
         event.preventDefault()
         @props.on_change(@state.text)
 
-    render_save_button : ->
+    render_save_button: ->
         if @state.text? and @state.text != @props.text
             <Button  style={marginBottom:'15px'} bsStyle='success' onClick={@saveChange}><Icon name='save' /> Save</Button>
 
-    render_input : ->
-        <Input type={@props.type ? 'text'} ref='input' rows={@props.rows}
-                   value={if @state.text? then @state.text else @props.text}
-                   onChange={=>@setState(text:@refs.input.getValue())}
+    render_input: ->
+        <FormGroup>
+            <FormControl type={@props.type ? 'text'} ref='input' rows={@props.rows}
+                       componentClass={if @props.type == 'textarea' then 'textarea' else 'input'}
+                       value={if @state.text? then @state.text else @props.text}
+                       onChange={=>@setState(text:ReactDOM.findDOMNode(@refs.input).value)}
             />
+        </FormGroup>
 
-    render : ->
+    render: ->
         <form onSubmit={@saveChange}>
             {@render_input()}
             {@render_save_button()}
@@ -345,23 +355,23 @@ exports.NumberInput = NumberInput = rclass
     displayName : 'Misc-NumberInput'
 
     propTypes :
-        number    : rtypes.number.isRequired
-        min       : rtypes.number.isRequired
-        max       : rtypes.number.isRequired
-        on_change : rtypes.func.isRequired
-        unit      : rtypes.string
-        disabled  : rtypes.bool
+        number      : rtypes.number.isRequired
+        min         : rtypes.number.isRequired
+        max         : rtypes.number.isRequired
+        on_change   : rtypes.func.isRequired
+        unit        : rtypes.string
+        disabled    : rtypes.bool
 
-    componentWillReceiveProps : (next_props) ->
+    componentWillReceiveProps: (next_props) ->
         if @props.number != next_props.number
             # so when the props change the state stays in sync (e.g., so save button doesn't appear, etc.)
             @setState(number : next_props.number)
 
-    getInitialState : ->
+    getInitialState: ->
         number : @props.number
 
-    saveChange : (event) ->
-        event.preventDefault()
+    saveChange: (e) ->
+        e?.preventDefault()
         n = parseInt(@state.number)
         if "#{n}" == "NaN"
             n = @props.number
@@ -372,28 +382,30 @@ exports.NumberInput = NumberInput = rclass
         @setState(number:n)
         @props.on_change(n)
 
-    render_save_button : ->
+    render_save_button: ->
         if @state.number? and @state.number != @props.number
             <Button className='pull-right' bsStyle='success' onClick={@saveChange}><Icon name='save' /> Save</Button>
 
-    render : ->
+    render: ->
         unit = if @props.unit? then "#{@props.unit}" else ''
         <Row>
             <Col xs=6>
                 <form onSubmit={@saveChange}>
-                    <Input
-                        type     = 'text'
-                        ref      = 'input'
-                        value    = {if @state.number? then @state.number else @props.number}
-                        onChange = {=>@setState(number:@refs.input.getValue())}
-                        disabled = {@props.disabled} />
+                    <FormGroup>
+                        <FormControl
+                            type     = 'text'
+                            ref      = 'input'
+                            value    = {if @state.number? then @state.number else @props.number}
+                            onChange = {=>@setState(number:ReactDOM.findDOMNode(@refs.input).value)}
+                            onBlur   = {@saveChange}
+                            onKeyDown= {(e)=>if e.keyCode == 27 then @setState(number:@props.number)}
+                            disabled = {@props.disabled}
+                        />
+                    </FormGroup>
                 </form>
             </Col>
-            <Col xs=2 className="lighten">
+            <Col xs=6 className="lighten">
                 {unit}
-            </Col>
-            <Col xs=4>
-                {@render_save_button()}
             </Col>
         </Row>
 
@@ -405,11 +417,10 @@ exports.LabeledRow = LabeledRow = rclass
         style      : rtypes.object
         label_cols : rtypes.number    # number between 1 and 11 (default: 4)
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         label_cols : 4
 
-    render : ->
-
+    render: ->
         <Row style={@props.style}>
             <Col xs={@props.label_cols}>
                 {@props.label}
@@ -432,19 +443,19 @@ exports.Help = rclass
         button_label : rtypes.string.isRequired
         title        : rtypes.string.isRequired
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         button_label : 'Help'
         title        : 'Help'
 
-    getInitialState : ->
+    getInitialState: ->
         closed : true
 
-    render_title : ->
+    render_title: ->
         <span>
             {@props.title}
         </span>
 
-    render : ->
+    render: ->
         if @state.closed
             <div>
                 <Button bsStyle='info' onClick={=>@setState(closed:false)}><Icon name='question-circle'/> {@props.button_label}</Button>
@@ -474,7 +485,7 @@ timeago_formatter = (value, unit, suffix, date) ->
         unit += 's'
     return "#{value} #{unit} #{suffix}"
 
-TimeAgo = require('react-timeago')
+TimeAgo = require('react-timeago').default
 exports.TimeAgo = rclass
     displayName : 'Misc-TimeAgo'
 
@@ -483,17 +494,21 @@ exports.TimeAgo = rclass
         placement   : rtypes.string
 
     getDefaultProps: ->
-        popover   : false
+        popover   : true
         minPeriod : 45000
         placement : 'top'
         # critical to use minPeriod>>1000, or things will get really slow in the client!!
         # Also, given our custom formatter, anything more than about 45s is pointless (since we don't show seconds)
 
     render_timeago: (d) ->
-        <TimeAgo date={d} style={@props.style} formatter={timeago_formatter} minPeriod={@props.minPeriod} />
+        <TimeAgo title='' date={d} style={@props.style} formatter={timeago_formatter} minPeriod={@props.minPeriod} />
 
     render: ->
         d = if misc.is_date(@props.date) then @props.date else new Date(@props.date)
+        if isNaN(d)  # http://stackoverflow.com/questions/1353684/detecting-an-invalid-date-date-instance-in-javascript
+            # This can and does happen!  Passing this to the third party TimeAgo component
+            # goes ballistic and crashes react (lame, but whatever).
+            return <div>Invalid Date</div>
         if @props.popover
             s = d.toLocaleString()
             <Tip title={s} id={s} placement={@props.placement}>
@@ -525,27 +540,28 @@ exports.SearchInput = rclass
         on_up           : rtypes.func    # push up arrow
         on_down         : rtypes.func    # push down arrow
         clear_on_submit : rtypes.bool    # if true, will clear search box on submit (default: false)
+        buttonAfter     : rtypes.object
 
-    getInitialState : ->
-        value     : @props.default_value
+    getInitialState: ->
+        value     : (@props.value || @props.default_value) ? ''
         ctrl_down : false
 
-    get_opts : ->
+    get_opts: ->
         ctrl_down : @state.ctrl_down
 
-    componentWillReceiveProps : (new_props) ->
+    componentWillReceiveProps: (new_props) ->
         if new_props.value?
             @setState(value : new_props.value)
 
-    componentDidMount : ->
+    componentDidMount: ->
         if @props.autoSelect
-            @refs.input.getInputDOMNode().select()
+            ReactDOM.findDOMNode(@refs.input).select()
 
-    clear_and_focus_search_input : ->
+    clear_and_focus_search_input: ->
         @set_value('')
-        @refs.input.getInputDOMNode().focus()
+        ReactDOM.findDOMNode(@refs.input).focus()
 
-    search_button : ->
+    search_button: ->
         if @props.buttonAfter?
             return @props.buttonAfter
         else
@@ -554,18 +570,18 @@ exports.SearchInput = rclass
                 <Icon name='times-circle' />
             </Button>
 
-    set_value : (value) ->
+    set_value: (value) ->
         @setState(value:value)
         @props.on_change?(value, @get_opts())
 
-    submit : (e) ->
+    submit: (e) ->
         e?.preventDefault()
         @props.on_change?(@state.value, @get_opts())
         @props.on_submit?(@state.value, @get_opts())
         if @props.clear_on_submit
             @setState(value:'')
 
-    key_down : (e) ->
+    key_down: (e) ->
         switch e.keyCode
             when 27
                 @escape()
@@ -578,27 +594,33 @@ exports.SearchInput = rclass
             when 13
                 @submit()
 
-    key_up : (e) ->
+    key_up: (e) ->
         switch e.keyCode
             when 17
                 @setState(ctrl_down : false)
 
-    escape : ->
+    escape: ->
         @props.on_escape?(@state.value)
         @set_value('')
 
-    render : ->
-        <Input
-            autoFocus   = {@props.autoFocus}
-            ref         = 'input'
-            type        = 'text'
-            placeholder = {@props.placeholder}
-            value       = {@state.value}
-            buttonAfter = {@search_button()}
-            onChange    = {=>@set_value(@refs.input.getValue())}
-            onKeyDown   = {@key_down}
-            onKeyUp     = {@key_up}
-        />
+    render: ->
+        <FormGroup>
+            <InputGroup>
+                <FormControl
+                    autoFocus   = {@props.autoFocus}
+                    ref         = 'input'
+                    type        = 'text'
+                    placeholder = {@props.placeholder}
+                    value       = {@state.value}
+                    onChange    = {=>@set_value(ReactDOM.findDOMNode(@refs.input).value)}
+                    onKeyDown   = {@key_down}
+                    onKeyUp     = {@key_up}
+                />
+                <InputGroup.Button>
+                    {@search_button()}
+                </InputGroup.Button>
+            </InputGroup>
+        </FormGroup>
 
 exports.MarkdownInput = rclass
     displayName : 'Misc-MarkdownInput'
@@ -612,35 +634,35 @@ exports.MarkdownInput = rclass
         rows          : rtypes.number
         placeholder   : rtypes.string
 
-    getInitialState : ->
+    getInitialState: ->
         editing : false
         value   : undefined
 
-    edit : ->
+    edit: ->
         @props.on_edit?()
         @setState(value:@props.default_value ? '', editing:true)
 
-    cancel : ->
+    cancel: ->
         @props.on_cancel?()
         @setState(editing:false)
 
-    save : ->
+    save: ->
         @props.on_save?(@state.value)
         @setState(editing:false)
 
-    keydown : (e) ->
+    keydown: (e) ->
         if e.keyCode==27
             @setState(editing:false)
         else if e.keyCode==13 and e.shiftKey
             @save()
 
-    to_html : ->
+    to_html: ->
         if @props.default_value
             {__html: markdown.markdown_to_html(@props.default_value).s}
         else
             {__html: ''}
 
-    render : ->
+    render: ->
         if @state.editing
 
             tip = <span>
@@ -656,19 +678,21 @@ exports.MarkdownInput = rclass
                     <Button key='cancel' onClick={@cancel}>Cancel</Button>
                 </ButtonToolbar>
                 <form onSubmit={@save} style={marginBottom: '-20px'}>
-                    <Input autoFocus
-                        ref         = 'input'
-                        type        = 'textarea'
-                        rows        = {@props.rows ? 4}
-                        placeholder = {@props.placeholder}
-                        value       = {@state.value}
-                        onChange    = {=>x=@refs.input.getValue();@setState(value:x); @props.on_change?(x)}
-                        onKeyDown   = {@keydown}
-                    />
+                    <FormGroup>
+                        <FormControl autoFocus
+                            ref         = 'input'
+                            componentClass = 'textarea'
+                            rows        = {@props.rows ? 4}
+                            placeholder = {@props.placeholder}
+                            value       = {@state.value}
+                            onChange    = {=>x=ReactDOM.findDOMNode(@refs.input).value; @setState(value:x); @props.on_change?(x)}
+                            onKeyDown   = {@keydown}
+                        />
+                    </FormGroup>
                 </form>
                 <div style={paddingTop:'8px', color:'#666'}>
                     <Tip title='Use Markdown' tip={tip}>
-                        Format using <a href='https://help.github.com/articles/basic-writing-and-formatting-syntax/' target='_blank'>Markdown</a>
+                        Format using <a href='https://help.github.com/articles/getting-started-with-writing-and-formatting-on-github/' target='_blank'>Markdown</a>
                     </Tip>
                 </div>
             </div>
@@ -686,43 +710,81 @@ exports.Markdown = rclass
         style      : rtypes.object
         project_id : rtypes.string   # optional -- can be used to improve link handling (e.g., to images)
         file_path  : rtypes.string   # optional -- ...
+        className  : rtypes.string   # optional class
 
     shouldComponentUpdate: (newProps) ->
         return @props.value != newProps.value or not underscore.isEqual(@props.style, newProps.style)
 
-    update_mathjax: ->
-        if @_x?.has_mathjax?
-            $(ReactDOM.findDOMNode(@)).mathjax()
+    _update_escaped_chars: ->
+        if not @_isMounted
+            return
+        node = $(ReactDOM.findDOMNode(@))
+        node.html(node[0].innerHTML.replace(/\\\$/g, '$'))
 
-    update_links: ->
+    _update_mathjax: (cb) ->
+        if not @_isMounted  # see https://github.com/sagemathinc/smc/issues/1689
+            return
+        #if DEBUG then console.log('Markdown._update_mathjax: @_x?.has_mathjax', @_x?.has_mathjax, @_x)
+        if @_x?.has_mathjax
+            $(ReactDOM.findDOMNode(@)).mathjax
+                cb : () =>
+                    # Awkward code, since cb may be called more than once.
+                    cb?()
+                    cb = undefined
+        else
+            cb()
+
+    _update_links: ->
+        if not @_isMounted
+            return
         $(ReactDOM.findDOMNode(@)).process_smc_links(project_id:@props.project_id, file_path:@props.file_path)
 
-    componentDidUpdate : ->
-        @update_links()
-        @update_mathjax()
+    update_content: ->
+        if not @_isMounted
+            return
+        # orchestrates the _update_* methods
+        @_update_mathjax =>
+            if not @_isMounted
+                return
+            @_update_escaped_chars()
+            @_update_links()   # this MUST be after update_escaped_chars -- see https://github.com/sagemathinc/smc/issues/1391
 
-    componentDidMount : ->
-        @update_links()
-        @update_mathjax()
+    componentDidUpdate: ->
+        @update_content()
 
-    to_html : ->
+    componentDidMount: ->
+        @_isMounted = true
+        @update_content()
+
+    componentWillUnmount: ->
+        # see https://facebook.github.io/react/blog/2015/12/16/ismounted-antipattern.html
+        # and https://github.com/sagemathinc/smc/issues/1689
+        @_isMounted = false
+
+    to_html: ->
         if @props.value
             # change escaped characters back for markdown processing
             v = @props.value.replace(/&gt;/g, '>').replace(/&lt;/g, '<')
             @_x = markdown.markdown_to_html(v)
-            {__html: @_x.s}
+            html_sane = require('./misc_page').sanitize_html(@_x.s)
+            #if DEBUG then console.log('Markdown.to_html @_x', @_x)
+            {__html: html_sane}
         else
             {__html: ''}
 
-    render : ->
-        <span dangerouslySetInnerHTML={@to_html()} style={@props.style}></span>
+    render: ->
+        <span
+            className               = {@props.className}
+            dangerouslySetInnerHTML = {@to_html()}
+            style                   = {@props.style}>
+        </span>
 
 activity_style =
     float           : 'right'
     backgroundColor : 'white'
     position        : 'absolute'
-    right           : '5px'
-    top             : '5px'
+    right           : '25px'
+    top             : '65px'
     border          : '1px solid #ccc'
     padding         : '10px'
     zIndex          : '10'
@@ -742,7 +804,7 @@ exports.ActivityDisplay = rclass
         trunc    : rtypes.number             # truncate activity messages at this many characters (default: 80)
         on_clear : rtypes.func               # if given, called when a clear button is clicked
 
-    render_items : ->
+    render_items: ->
         n = @props.trunc ? 80
         trunc = (s) -> misc.trunc(s, n)
         for desc, i in @props.activity
@@ -750,7 +812,7 @@ exports.ActivityDisplay = rclass
                 <Icon name='circle-o-notch' spin /> {trunc(desc)}
             </div>
 
-    render : ->
+    render: ->
         if misc.len(@props.activity) > 0
             <div key='activity' style={activity_style}>
                 {<CloseX on_close={@props.on_clear} /> if @props.on_clear?}
@@ -768,23 +830,32 @@ exports.Tip = Tip = rclass
         tip       : rtypes.oneOfType([rtypes.string, rtypes.node])
         size      : rtypes.string   # "xsmall", "small", "medium", "large"
         delayShow : rtypes.number
+        delayHide : rtypes.number
+        rootClose : rtypes.bool
         icon      : rtypes.string
         id        : rtypes.string   # can be used for screen readers (otherwise defaults to title)
+        style     : rtypes.object
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         placement : 'right'
-        delayShow : 600
+        delayShow : 500
+        delayHide : 100
+        rootClose : false
+
+    getInitialState: ->
+        display_trigger : false
 
     render_title: ->
         <span>{<Icon name={@props.icon}/> if @props.icon} {@props.title}</span>
 
-    render_popover : ->
+    render_popover: ->
         if @props.tip
             <Popover
                 bsSize = {@props.size}
                 title  = {@render_title()}
                 id     = {@props.id ? "tip"}
-                >
+                style  = {zIndex:'1000'}
+            >
                 <span style={wordWrap:'break-word'}>
                     {@props.tip}
                 </span>
@@ -792,18 +863,34 @@ exports.Tip = Tip = rclass
         else
             <Tooltip
                 bsSize = {@props.size}
-                id     = {@props.id ? "tip"} >
+                id     = {@props.id ? "tip"}
+                style  = {zIndex:'1000'}
+            >
                 {@render_title()}
             </Tooltip>
 
-    render : ->
-        <OverlayTrigger
-            placement = {@props.placement}
-            overlay   = {@render_popover()}
-            delayShow = 600
+    render: ->
+        if not @state.display_trigger
+            <span style={@props.style}
+                onMouseEnter={=>@setState(display_trigger:true)}
             >
-            <span>{@props.children}</span>
-        </OverlayTrigger>
+                {@props.children}
+            </span>
+        else
+            <OverlayTrigger
+                placement = {@props.placement}
+                overlay   = {@render_popover()}
+                delayShow = {@props.delayShow}
+                delayHide = {@props.delayHide}
+                rootClose = {@props.rootClose}
+            >
+                <span
+                    style={@props.style}
+                    onMouseLeave={=>@setState(display_trigger:false)}
+                >
+                    {@props.children}
+                </span>
+            </OverlayTrigger>
 
 exports.SaveButton = rclass
     displayName : 'Misc-SaveButton'
@@ -813,46 +900,45 @@ exports.SaveButton = rclass
         disabled : rtypes.bool
         on_click : rtypes.func.isRequired
 
-    render : ->
+    render: ->
         <Button bsStyle='success' disabled={@props.saving or not @props.unsaved} onClick={@props.on_click}>
             <Icon name='save' /> Sav{if @props.saving then <span>ing... <Icon name='circle-o-notch' spin /></span> else <span>e</span>}
         </Button>
 
-exports.FileLink = rclass
-    displayName : 'Misc-FileLink'
+# Compnent to attempt opening an smc path in a project
+exports.PathLink = rclass
+    displayName : 'Misc-PathLink'
 
     propTypes :
         path         : rtypes.string.isRequired
+        project_id   : rtypes.string.isRequired
         display_name : rtypes.string # if provided, show this as the link and show real name in popover
         full         : rtypes.bool   # true = show full path, false = show only basename
         trunc        : rtypes.number # truncate longer names and show a tooltip with the full name
         style        : rtypes.object
         link         : rtypes.bool   # set to false to make it not be a link
-        actions      : rtypes.object.isRequired
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         style : {}
         full  : false
         link  : true
 
-    handle_click : (e) ->
+    handle_click: (e) ->
         e.preventDefault()
-        if misc.endswith(@props.path, '/')
-            @props.actions.set_current_path(@props.path)
-            @props.actions.set_focused_page('project-file-listing')
-        else
-            @props.actions.open_file
-                path       : @props.path
-                foreground : misc.should_open_in_foreground(e)
+        path_head = 'files'
+        path_head += '/' if @props.path[0] != '/'
+        @actions('projects').open_project
+            project_id : @props.project_id
+            target     : path_head + @props.path
+            switch_to  : misc.should_open_in_foreground(e)
 
-
-    render_link : (text) ->
+    render_link: (text) ->
         if @props.link
             <a onClick={@handle_click} style={@props.style} href=''>{text}</a>
         else
             <span style={@props.style}>{text}</span>
 
-    render : ->
+    render: ->
         name = if @props.full then @props.path else misc.path_split(@props.path).tail
         if name.length > @props.trunc or (@props.display_name? and @props.display_name isnt name)
             if @props.trunc?
@@ -887,7 +973,7 @@ exports.DateTimePicker = rclass
         value     : rtypes.oneOfType([rtypes.string, rtypes.object])
         on_change : rtypes.func.isRequired
 
-    render : ->
+    render: ->
         <DateTimePicker
             step       = {60}
             editFormat = {'MMM d, yyyy h:mm tt'}
@@ -905,7 +991,7 @@ exports.Calendar = rclass
         value     : rtypes.oneOfType([rtypes.string, rtypes.object])
         on_change : rtypes.func.isRequired
 
-    render : ->
+    render: ->
         <Calendar
             defaultValue = {@props.value}
             onChange     = {@props.on_change}
@@ -932,7 +1018,6 @@ exports.DirectoryInput = rclass
             directory_trees : rtypes.immutable
 
     propTypes :
-        redux         : rtypes.object
         project_id    : rtypes.string.isRequired
         on_change     : rtypes.func.isRequired
         default_value : rtypes.string
@@ -940,16 +1025,20 @@ exports.DirectoryInput = rclass
         autoFocus     : rtypes.bool
         on_key_down   : rtypes.func
         on_key_up     : rtypes.func
+        exclusions    : rtypes.array
 
-    render : ->
+    render: ->
         x = @props.directory_trees?.get(@props.project_id)?.toJS()
         if not x? or new Date() - x.updated >= 15000
-            @props.redux.getActions('projects').fetch_directory_tree(@props.project_id)
+            redux.getActions('projects').fetch_directory_tree(@props.project_id, exclusions:@props.exclusions)
         tree = x?.tree
         if tree?
-            # TODO: spaces below are a terrible hack to get around weird design of Combobox.
-            tree = (x + ' ' for x in tree)
-            group = (s) -> s[0 ... s.indexOf('/')]
+            group = (s) ->
+                i = s.indexOf('/')
+                if i == -1
+                    return s
+                else
+                    return s.slice(0, i)
         else
             group = (s) -> s
         <Combobox
@@ -960,7 +1049,7 @@ exports.DirectoryInput = rclass
             defaultValue = {@props.default_value}
             placeholder  = {@props.placeholder}
             messages     = {emptyFilter : '', emptyList : ''}
-            onChange     = {(value) => @props.on_change(value.trim())}
+            onChange     = {(value) => @props.on_change(value)}
             onKeyDown    = {@props.on_key_down}
             onKeyUp      = {@props.on_key_up}
         />
@@ -978,12 +1067,13 @@ exports.DeletedProjectWarning = ->
 exports.course_warning = (pay) ->
     if not pay
         return false
+    {salvus_client} = require('./salvus_client')
     return salvus_client.server_time() <= misc.months_before(-3, pay)  # require subscription until 3 months after start (an estimate for when class ended, and less than when what student did pay for will have expired).
 
 project_warning_opts = (opts) ->
-    {upgrades_you_can_use, upgrades_you_applied_to_all_projects, course_info, account_id, email_address} = opts
-    total = upgrades_you_can_use?.member_host ? 0
-    used  = upgrades_you_applied_to_all_projects?.member_host ? 0
+    {upgrades_you_can_use, upgrades_you_applied_to_all_projects, course_info, account_id, email_address, upgrade_type} = opts
+    total = upgrades_you_can_use?[upgrade_type] ? 0
+    used  = upgrades_you_applied_to_all_projects?[upgrade_type] ? 0
     x =
         total          : total
         used           : used
@@ -994,6 +1084,11 @@ project_warning_opts = (opts) ->
         email_address  : email_address
     return x
 
+exports.CourseProjectExtraHelp = CourseProjectExtraHelp = ->
+    <div style={marginTop:'10px'}>
+       If you have already paid, you can go to the settings in your project and click the "Adjust  your quotas..." button, then click the checkboxes next to network and member hosting.  If it says you do not have enough quota, visit the Upgrades tab in account settings, see where the upgrades are, remove them from another project, then try again.
+    </div>
+
 exports.CourseProjectWarning = (opts) ->
     {total, used, avail, course_info, course_warning, account_id, email_address} = project_warning_opts(opts)
     if not course_warning
@@ -1002,6 +1097,7 @@ exports.CourseProjectWarning = (opts) ->
     # We may now assume course_info.get is defined, since course_warning is only true if it is.
     pay = course_info.get('pay')
     is_student = account_id == course_info.get('account_id') or email_address == course_info.get('email_address')
+    {salvus_client} = require('./salvus_client')
     if pay > salvus_client.server_time()  # in the future
         if is_student
             deadline  = <span>Your instructor requires you to {action} within <TimeAgo date={pay}/>.</span>
@@ -1011,7 +1107,7 @@ exports.CourseProjectWarning = (opts) ->
         label = 'Warning'
     else
         if is_student
-            deadline  = <span>Your instructor requires you to {action} now to continuing using this project.</span>
+            deadline  = <span>Your instructor requires you to {action} now to continuing using this project.{<CourseProjectExtraHelp/> if total>0}</span>
         else
             deadline = <span>Your student must buy a course subscription to continue using this project.</span>
         style = 'danger'
@@ -1024,11 +1120,11 @@ exports.CourseProjectWarning = (opts) ->
 exports.LoginLink = rclass
     displayName : 'Misc-LoginLink'
 
-    render : ->  # TODO: the code to switch page below will change when we get a top-level navigation store.
+    render: ->  # TODO: the code to switch page below will change when we get a top-level navigation store.
         <Alert bsStyle='info' style={margin:'15px'}>
             <Icon name='sign-in' style={fontSize:'13pt', marginRight:'10px'} /> Please<Space/>
             <a style={cursor: 'pointer'}
-                onClick={=>require('./top_navbar').top_navbar.switch_to_page('account')}>
+                onClick={=>redux.getActions('page').set_active_tab('account')}>
                 login or create an account...
             </a>
         </Alert>
@@ -1040,13 +1136,13 @@ exports.ProjectState = rclass
     propTypes :
         state : rtypes.string
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         state : 'unknown'
 
     render_spinner:  ->
         <span>... <Icon name='circle-o-notch' spin /></span>
 
-    render : ->
+    render: ->
         s = COMPUTE_STATES[@props.state]
         if not s?
             return <Loading />
@@ -1067,48 +1163,52 @@ EditorFileInfoDropdown = rclass
         actions   : rtypes.object.isRequired
         is_public : rtypes.bool
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         is_public : false
 
-    handle_click : (name) ->
-        @props.actions.set_current_path(misc.path_split(@props.filename).head)
-        @props.actions.set_focused_page('project-file-listing')
+    handle_click: (name) ->
+        path_splitted = misc.path_split(@props.filename)
+        get_basename = ->
+                path_splitted.tail
+        @props.actions.open_directory(path_splitted.head)
         @props.actions.set_all_files_unchecked()
         @props.actions.set_file_checked(@props.filename, true)
-        @props.actions.set_file_action(name)
+        @props.actions.set_file_action(name, get_basename)
 
-    render_menu_item : (name, icon) ->
+    render_menu_item: (name, icon) ->
         <MenuItem onSelect={=>@handle_click(name)} key={name} >
             <Icon name={icon} fixedWidth /> {"#{misc.capitalize(name)}..."}
         </MenuItem>
 
-    render_menu_items : ->
+    render_menu_items: ->
         if @props.is_public
             # Fewer options when viewing the action dropdown in public mode:
             items =
                 'download' : 'cloud-download'
                 'copy'     : 'files-o'
         else
-            items =
-                'download' : 'cloud-download'
-                'delete'   : 'trash-o'
-                'rename'   : 'pencil'
-                'move'     : 'arrows'
-                'copy'     : 'files-o'
-                'share'    : 'share-square-o'
+            # dynamically create a map from 'key' to 'icon'
+            {file_action_buttons} = require('./project_files')
+            items = _.object(([k, v.icon] for k, v of file_action_buttons))
 
         for name, icon of items
             @render_menu_item(name, icon)
 
-    render : ->
-        <DropdownButton style={marginRight:'2px'} id='file_info_button' bsStyle='info' title={<Icon name='info-circle' />} className='pull-left'>
+    render_dropdown_button: (bsSize, className) ->
+        <DropdownButton style={marginRight:'2px'} id='file_info_button' bsStyle='info' bsSize={bsSize} title={<Icon name='info-circle' />} className={className}>
             {@render_menu_items()}
         </DropdownButton>
 
-exports.render_file_info_dropdown = (filename, actions, dom_node, is_public) ->
-    ReactDOM.render(<EditorFileInfoDropdown filename={filename} actions={actions} is_public={is_public}/>, dom_node)
+    render: ->
+        <div>
+            {@render_dropdown_button('large', 'pull-left visible-xs')}
+            {@render_dropdown_button(null, 'pull-left hidden-xs')}
+        </div>
 
-exports.UPGRADE_ERROR_STYLE =
+exports.render_file_info_dropdown = (filename, actions, dom_node, is_public) ->
+    ReactDOM.render(<EditorFileInfoDropdown filename={filename} actions={actions} is_public={is_public} />, dom_node)
+
+exports.UPGRADE_ERROR_STYLE = UPGRADE_ERROR_STYLE =
     color        : 'white'
     background   : 'red'
     padding      : '1ex'
@@ -1116,4 +1216,389 @@ exports.UPGRADE_ERROR_STYLE =
     fontWeight   : 'bold'
     marginBottom : '1em'
 
+{PROJECT_UPGRADES} = require('smc-util/schema')
 
+exports.NoUpgrades = NoUpgrades = rclass
+    displayName : 'NoUpgrades'
+
+    propTypes :
+        cancel : rtypes.func.isRequired
+
+    billing: (e) ->
+        e.preventDefault()
+        require('./billing').visit_billing_page()
+
+    render: ->
+        <Alert bsStyle='info'>
+            <h3><Icon name='exclamation-triangle' /> Your account has no upgrades available</h3>
+            <p>You can purchase upgrades starting at $7 / month.</p>
+            <p><a href='' onClick={@billing}>Visit the billing page...</a></p>
+            <Button onClick={@props.cancel}>Cancel</Button>
+        </Alert>
+
+###
+ Takes current upgrades data and quota parameters and provides an interface for the user to update these parameters.
+ submit_upgrade_quotas will recieve a javascript object in the same format as quota_params
+ cancel_upgrading takes no arguments and is called when the cancel button is hit.
+###
+exports.UpgradeAdjustor = rclass
+    displayName : 'UpgradeAdjustor'
+
+    propTypes :
+        quota_params                         : rtypes.object.isRequired # from the schema
+        submit_upgrade_quotas                : rtypes.func.isRequired
+        cancel_upgrading                     : rtypes.func.isRequired
+        disable_submit                       : rtypes.bool
+        upgrades_you_can_use                 : rtypes.object
+        upgrades_you_applied_to_all_projects : rtypes.object
+        upgrades_you_applied_to_this_project : rtypes.object
+
+    getDefaultProps: ->
+        upgrades_you_can_use                 : {}
+        upgrades_you_applied_to_all_projects : {}
+        upgrades_you_applied_to_this_project : {}
+
+    getInitialState: ->
+        state = {}
+
+        current = @props.upgrades_you_applied_to_this_project
+
+        for name, data of @props.quota_params
+            factor = data.display_factor
+            if data.input_type == 'checkbox' and @props.submit_text == "Create project with upgrades"
+                current_value = current[name] ? 1
+            else
+                current_value = current[name] ? 0
+            state["upgrade_#{name}"] = misc.round2(current_value * factor)
+
+        return state
+
+     get_quota_info : ->
+        # how much upgrade you currently use on this one project
+        current = @props.upgrades_you_applied_to_this_project
+        # how much unused upgrade you have remaining
+        remaining = misc.map_diff(@props.upgrades_you_can_use, @props.upgrades_you_applied_to_all_projects)
+        # maximums you can use, including the upgrades already on this project
+        limits = misc.map_sum(current, remaining)
+        # additionally, the limits are capped by the maximum per project
+        maximum = require('smc-util/schema').PROJECT_UPGRADES.max_per_project
+        limits = misc.map_limit(limits, maximum)
+
+        limits    : limits
+        remaining : remaining
+        current   : current
+
+    clear_upgrades: ->
+        @set_upgrades('min')
+
+    max_upgrades: ->
+        @set_upgrades('max')
+
+    set_upgrades: (description) ->
+        info = @get_quota_info()
+        new_upgrade_state = {}
+        for name, data of @props.quota_params
+            factor = data.display_factor
+            switch description
+                when 'max'
+                    current_value = info.limits[name]
+                when 'min'
+                    current_value = 0
+            new_upgrade_state["upgrade_#{name}"] = misc.round2(current_value * factor)
+
+        return @setState(new_upgrade_state)
+
+    is_upgrade_input_valid: (input, max) ->
+        val = misc.parse_number_input(input, round_number=false)
+        if not val? or val > Math.max(0, max)
+            return false
+        else
+            return true
+
+    # the max button will set the upgrade input box to the number given as max
+    render_max_button: (name, max) ->
+        <Button
+            bsSize  = 'xsmall'
+            onClick = {=>@setState("upgrade_#{name}" : max)}
+            style   = {padding:'0px 5px'}
+        >
+            Max
+        </Button>
+
+    render_addon: (misc, name, display_unit, limit) ->
+        <div style={minWidth:'81px'}>{"#{misc.plural(2,display_unit)}"} {@render_max_button(name, limit)}</div>
+
+    render_upgrade_row: (name, data, remaining=0, current=0, limit=0) ->
+        if not data?
+            return
+
+        {display, desc, display_factor, display_unit, input_type} = data
+
+        if input_type == 'checkbox'
+
+            # the remaining count should decrease if box is checked
+            val = @state["upgrade_#{name}"]
+            show_remaining = remaining + current - val
+            show_remaining = Math.max(show_remaining, 0)
+
+            if not @is_upgrade_input_valid(val, limit)
+                label = <div style=UPGRADE_ERROR_STYLE>Uncheck this: you do not have enough upgrades</div>
+            else
+                label = if val == 0 then 'Enable' else 'Enabled'
+
+            <Row key={name} style={marginTop:'5px'}>
+                <Col sm=6>
+                    <Tip title={display} tip={desc}>
+                        <strong>{display}</strong>
+                    </Tip>
+                    <br/>
+                    You have {show_remaining} unallocated {misc.plural(show_remaining, display_unit)}
+                </Col>
+                <Col sm=6>
+                    <form>
+                        <Checkbox
+                            ref      = {"upgrade_#{name}"}
+                            checked  = {val > 0}
+                            onChange = {(e)=>@setState("upgrade_#{name}" : if e.target.checked then 1 else 0)}>
+                            {label}
+                        </Checkbox>
+                    </form>
+                </Col>
+            </Row>
+
+
+        else if input_type == 'number'
+            remaining = misc.round2(remaining * display_factor)
+            display_current = current * display_factor # current already applied
+            if current != 0 and misc.round2(display_current) != 0
+                current = misc.round2(display_current)
+            else
+                current = display_current
+
+            limit = misc.round2(limit * display_factor)
+            current_input = misc.parse_number_input(@state["upgrade_#{name}"]) ? 0 # current typed in
+
+            # the amount displayed remaining subtracts off the amount you type in
+            show_remaining = misc.round2(remaining + current - current_input)
+
+            val = @state["upgrade_#{name}"]
+            if not @is_upgrade_input_valid(val, limit)
+                bs_style = 'error'
+                if misc.parse_number_input(val)?
+                    label = <div style=UPGRADE_ERROR_STYLE>Value too high: not enough upgrades or exceeding limit</div>
+                else
+                    label = <div style=UPGRADE_ERROR_STYLE>Please enter a number</div>
+            else
+                label = <span></span>
+
+            remaining_all = Math.max(show_remaining, 0)
+            schema_limit = PROJECT_UPGRADES.max_per_project
+            display_factor = PROJECT_UPGRADES.params[name].display_factor
+            # calculates the amount of remaining quotas: limited by the max upgrades and subtract the already applied quotas
+            total_limit = schema_limit[name]*display_factor
+
+            unit = misc.plural(show_remaining, display_unit)
+            if total_limit < remaining
+                remaining_note = <span> You have {remaining_all} unallocated {unit} (you may allocate up to {total_limit} {unit} here)</span>
+
+            else
+                remaining_note = <span>You have {remaining_all} unallocated {unit}</span>
+
+            <Row key={name} style={marginTop:'5px'}>
+                <Col sm=6>
+                    <Tip title={display} tip={desc}>
+                        <strong>{display}</strong>
+                    </Tip>
+                    <br/>
+                    {remaining_note}
+                </Col>
+                <Col sm=6>
+                    <FormGroup>
+                        <InputGroup>
+                            <FormControl
+                                ref        = {"upgrade_#{name}"}
+                                type       = 'text'
+                                value      = {val}
+                                bsStyle    = {bs_style}
+                                onChange   = {=>@setState("upgrade_#{name}" : ReactDOM.findDOMNode(@refs["upgrade_#{name}"]).value)}
+                            />
+                            <InputGroup.Addon>
+                                {@render_addon(misc, name, display_unit, limit)}
+                            </InputGroup.Addon>
+                        </InputGroup>
+                    </FormGroup>
+                    {label}
+                </Col>
+            </Row>
+        else
+            console.warn('Invalid input type in render_upgrade_row: ', input_type)
+            return
+
+    save_upgrade_quotas: (remaining) ->
+        current = @props.upgrades_you_applied_to_this_project
+        new_upgrade_quotas = {}
+        new_upgrade_state  = {}
+        for name, data of @props.quota_params
+            factor = data.display_factor
+            current_val = misc.round2((current[name] ? 0) * factor)
+            remaining_val = Math.max(misc.round2((remaining[name] ? 0) * factor), 0) # everything is now in display units
+
+            if data.input_type is 'checkbox'
+                input = @state["upgrade_#{name}"] ? current_val
+                if input and (remaining_val > 0 or current_val > 0)
+                    val = 1
+                else
+                    val = 0
+
+            else
+                # parse the current user input, and default to the current value if it is (somehow) invalid
+                input = misc.parse_number_input(@state["upgrade_#{name}"]) ? current_val
+                input = Math.max(input, 0)
+                limit = current_val + remaining_val
+                val = Math.min(input, limit)
+
+            new_upgrade_state["upgrade_#{name}"] = val
+            new_upgrade_quotas[name] = misc.round2(val / factor) # only now go back to internal units
+
+        @props.submit_upgrade_quotas(new_upgrade_quotas)
+        # set the state so that the numbers are right if you click upgrade again
+        @setState(new_upgrade_state)
+
+    # Returns true if the inputs are valid and different:
+    #    - at least one has changed
+    #    - none are negative
+    #    - none are empty
+    #    - none are higher than their limit
+    valid_changed_upgrade_inputs: (current, limits) ->
+        for name, data of @props.quota_params
+            factor = data.display_factor
+            # the highest number the user is allowed to type
+            limit = Math.max(0, misc.round2((limits[name] ? 0) * factor))  # max since 0 is always allowed
+            # the current amount applied to the project
+            cur_val = misc.round2((current[name] ? 0) * factor)
+            # the current number the user has typed (undefined if invalid)
+            new_val = misc.parse_number_input(@state["upgrade_#{name}"])
+            if not new_val? or new_val > limit
+                return false
+            if cur_val isnt new_val
+                changed = true
+        return changed
+
+    render: ->
+        if misc.is_zero_map(@props.upgrades_you_can_use)
+            # user has no upgrades on their account
+            <NoUpgrades cancel={@props.cancel_upgrading} />
+        else
+            # NOTE : all units are currently 'internal' instead of display, e.g. seconds instead of hours
+            quota_params = @props.quota_params
+            # how much upgrade you have used between all projects
+            used_upgrades = @props.upgrades_you_applied_to_all_projects
+            # how much upgrade you currently use on this one project
+            current = @props.upgrades_you_applied_to_this_project
+            # how much unused upgrade you have remaining
+            remaining = misc.map_diff(@props.upgrades_you_can_use, used_upgrades)
+            # maximums you can use, including the upgrades already on this project
+            limits = misc.map_sum(current, remaining)
+            # additionally, the limits are capped by the maximum per project
+            maximum = require('smc-util/schema').PROJECT_UPGRADES.max_per_project
+            limits = misc.map_limit(limits, maximum)
+
+            <Alert bsStyle='warning'>
+                <h3><Icon name='arrow-circle-up' /> Adjust your project quota contributions</h3>
+
+                <span style={color:"#666"}>Adjust <i>your</i> contributions to the quotas on this project (disk space, memory, cores, etc.).  The total quotas for this project are the sum of the contributions of all collaborators and the free base quotas.</span>
+                <hr/>
+                <Row>
+                    <Col md=1>
+                        <b style={fontSize:'12pt'}>Quota</b>
+                    </Col>
+                    <Col md=5>
+                        <Button
+                            bsSize  = 'xsmall'
+                            onClick = {@max_upgrades}
+                            style   = {padding:'0px 5px'}
+                        >
+                            Max all upgrades
+                        </Button>
+                        {' '}
+                        <Button
+                            bsSize  = 'xsmall'
+                            onClick = {@clear_upgrades}
+                            style   = {padding:'0px 5px'}
+                        >
+                            Remove all upgrades
+                        </Button>
+                    </Col>
+                    <Col md=6>
+                        <b style={fontSize:'12pt'}>Your contribution</b>
+                    </Col>
+                </Row>
+                <hr/>
+
+                {@render_upgrade_row(n, quota_params[n], remaining[n], current[n], limits[n]) for n in PROJECT_UPGRADES.field_order}
+                {@props.children}
+                <ButtonToolbar style={marginTop:'10px'}>
+                    <Button
+                        bsStyle  = 'success'
+                        onClick  = {=>@save_upgrade_quotas(remaining)}
+                        disabled = {@props.disable_submit or not @valid_changed_upgrade_inputs(current, limits)}
+                    >
+                        <Icon name='arrow-circle-up' /> {if @props.submit_text then @props.submit_text else "Submit changes"}
+                    </Button>
+                    <Button onClick={@props.cancel_upgrading}>
+                        Cancel
+                    </Button>
+                </ButtonToolbar>
+            </Alert>
+
+
+###
+Drag'n'Drop dropzone area
+###
+ReactDOMServer = require('react-dom/server')   # for dropzone below
+Dropzone       = require('react-dropzone-component')
+
+exports.SMC_Dropzone = rclass
+    displayName: 'SMC_Dropzone'
+
+    propTypes:
+        project_id           : rtypes.string.isRequired
+        current_path         : rtypes.string.isRequired
+        dropzone_handler     : rtypes.object.isRequired
+
+    dropzone_template : ->
+        <div className='dz-preview dz-file-preview'>
+            <div className='dz-details'>
+                <div className='dz-filename'><span data-dz-name></span></div>
+                <img data-dz-thumbnail />
+            </div>
+            <div className='dz-progress'><span className='dz-upload' data-dz-uploadprogress></span></div>
+            <div className='dz-success-mark'><span><Icon name='check'></span></div>
+            <div className='dz-error-mark'><span><Icon name='times'></span></div>
+            <div className='dz-error-message'><span data-dz-errormessage></span></div>
+        </div>
+
+    postUrl : ->
+        dest_dir = misc.encode_path(@props.current_path)
+        postUrl  = window.smc_base_url + "/upload?project_id=#{@props.project_id}&dest_dir=#{dest_dir}"
+        return postUrl
+
+    render: ->
+        <div>
+            {<div className='close-button pull-right'>
+                <span
+                    onClick={@props.close_button_onclick}
+                    className='close-button-x'
+                    style={cursor: 'pointer', fontSize: '18px', color:'gray'}><i className="fa fa-times"></i></span>
+            </div> if @props.close_button_onclick?}
+            <Tip icon='file' title='Drag and drop files' placement='top'
+                tip='Drag and drop files from your computer into the box below to upload them into your project.  You can upload individual files that are up to 30MB in size.'>
+                <h4 style={color:"#666"}>Drag and drop files (Currently, each file must be under 30MB; for bigger files, use SSH as explained in project settings.)</h4>
+            </Tip>
+            <div style={border: '2px solid #ccc', boxShadow: '4px 4px 2px #bbb', borderRadius: '5px', padding: 0, margin: '10px'}>
+                <Dropzone
+                    config        = {postUrl: @postUrl()}
+                    eventHandlers = {@props.dropzone_handler}
+                    djsConfig     = {previewTemplate: ReactDOMServer.renderToStaticMarkup(@dropzone_template())} />
+            </div>
+        </div>

@@ -2,7 +2,7 @@
 #
 #    SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2015, SageMathCloud Authors
+#    Copyright (C) 2015, SageMath, Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -46,7 +46,7 @@ DATA = null
 
 # react wizard
 {React, ReactDOM, redux, Redux, Actions, Store, rtypes, rclass} = require('./smc-react')
-{Col, Row, Panel, Button, Input, Well, Alert, Modal, Table, Nav, NavItem, ListGroup, ListGroupItem} = require('react-bootstrap')
+{Col, Row, Panel, Button, FormGroup, FormControl, Well, Alert, Modal, Table, Nav, NavItem, ListGroup, ListGroupItem} = require('react-bootstrap')
 {Loading, Icon, Markdown} = require('./r_misc')
 
 redux_name = (project_id, path) ->
@@ -57,12 +57,16 @@ class WizardStore extends Store
 class WizardActions extends Actions
     get: (key) ->
         @redux.getStore(@name).get(key)
+
     set: (update) ->
         @setState(update)
+
     show: (lang='sage') =>
-        @set
-            show: true
-            lang: lang
+        if lang != @get('lang')
+            @init(lang=lang)
+        else
+            @set(show: true)
+
     reset: ->
         @set
             cat0       : null # idx integer
@@ -84,8 +88,9 @@ class WizardActions extends Actions
 
     init: (lang='sage') ->
         @reset()
-        @show(lang=lang)
+        @set(lang: lang)
         @load_data()
+        @set(show: true)
 
     init_data: (data) ->
         @set(data: data)
@@ -176,7 +181,7 @@ class WizardActions extends Actions
         @show_doc(doc)
         @set(search_sel : idx)
 
-    search_cursor : (dir) ->
+    search_cursor: (dir) ->
         # searching and then cursor-selecting search results
         # dir: +1 → downward / -1 → upward
         if not @get('hits')?
@@ -210,7 +215,7 @@ class WizardActions extends Actions
         return ord(a) - ord(b) or a > b
 
 
-    select_cursor : (dir) ->
+    select_cursor: (dir) ->
         # dir: only 1 or -1!
         # +1 → downward, higher idx number, first in list
         # -1 → upwards, lower index, last in list
@@ -306,6 +311,9 @@ WizardHeader = rclass
         search_str  : rtypes.string
         lang        : rtypes.string.isRequired
 
+    getDefaultProps: ->
+        search_str : ''
+
     langSelect: (key) ->
         @props.actions.select_lang(key)
 
@@ -314,7 +322,7 @@ WizardHeader = rclass
         evt.stopPropagation()
         @props.actions.search(evt.target.value)
 
-    handle_search_keyup : (evt) ->
+    handle_search_keyup: (evt) ->
         if not @props.search_str?.length
             return true
         switch evt.keyCode
@@ -335,7 +343,7 @@ WizardHeader = rclass
         evt.nativeEvent.stopImmediatePropagation() # what ?!
         return false
 
-    render_nav : ->
+    render_nav: ->
         entries = @props.nav_entries
         entries ?= []
         <Nav bsStyle="pills" activeKey={@props.lang} ref='lang' onSelect={@langSelect}>
@@ -345,20 +353,22 @@ WizardHeader = rclass
             }
         </Nav>
 
-    render : ->
+    render: ->
         <Row>
             <Col sm={3}><h2><Icon name='magic' /> Wizard</h2></Col>
             <Col sm={5}>
                 {@render_nav()}
             </Col>
             <Col sm={3}>
-                <Input ref='search'
+                <FormGroup>
+                    <FormControl ref='search'
                        type='text'
                        className='smc-wizard-search'
                        placeholder='Search'
-                       value={@props.search_str}
+                       value={@props.search_str ? ''}
                        onKeyUp={@handle_search_keyup}
                        onChange={@search}  />
+                </FormGroup>
             </Col>
         </Row>
 
@@ -381,11 +391,15 @@ WizardBody = rclass
         search_sel : rtypes.number
         hits       : rtypes.arrayOf(rtypes.array)
 
-    componentWillMount: ->
-        @scrollTo0 = _.debounce (() -> $(@refs.list_0).find('.active').scrollintoview()), 50
-        @scrollTo1 = _.debounce (() -> $(@refs.list_1).find('.active').scrollintoview()), 50
-        @scrollTo2 = _.debounce (() -> $(@refs.list_2).find('.active').scrollintoview()), 50
-        @scrollToS = _.debounce (() -> $(@refs.search_results_list).find('.active').scrollintoview()), 50
+    getDefaultProps: ->
+        descr      : ''
+        search_str : ''
+
+    componentDidMount: ->
+        @scrollTo0 = _.debounce (() -> $(ReactDOM.findDOMNode(@refs.list_0)).find('.active').scrollIntoView()), 50
+        @scrollTo1 = _.debounce (() -> $(ReactDOM.findDOMNode(@refs.list_1)).find('.active').scrollIntoView()), 50
+        @scrollTo2 = _.debounce (() -> $(ReactDOM.findDOMNode(@refs.list_2)).find('.active').scrollIntoView()), 50
+        @scrollToS = _.debounce (() -> $(ReactDOM.findDOMNode(@refs.search_results_list)).find('.active').scrollIntoView()), 50
 
     componentDidUpdate: (props, state) ->
         @scrollTo0()
@@ -413,7 +427,7 @@ WizardBody = rclass
     search_result_selection: (idx) ->
         @props.actions.search_selected(idx)
 
-    render_search_results : ->
+    render_search_results: ->
         ss = @props.search_str
         <ul className='list-group' ref='search_results_list'>
             {@props.hits.map (hit, idx) =>
@@ -437,7 +451,7 @@ WizardBody = rclass
             }
         </ul>
 
-    render_top : ->
+    render_top: ->
         searching = @props.search_str?.length > 0
         if not @props.data?
             <Row>
@@ -459,7 +473,7 @@ WizardBody = rclass
                 <Col sm={6}>{@category_list(2)}</Col>
             </Row>
 
-    render : ->
+    render: ->
         <Modal.Body className='modal-body'>
             {@render_top()}
             <Row>
@@ -502,21 +516,21 @@ RWizard = (name) -> rclass
         cb      : rtypes.func
         actions : rtypes.object.isRequired
 
-    getInitialState : ->
+    getInitialState: ->
         search  : ''
 
-    close : ->
+    close: ->
         @props.actions.hide()
 
-    insert_code : ->
+    insert_code: ->
         @props.actions.insert(@props.cb, false)
         @close()
 
-    insert_all : ->
+    insert_all: ->
         @props.actions.insert(@props.cb, true)
         @close()
 
-    handle_dialog_keyup : (evt) ->
+    handle_dialog_keyup: (evt) ->
         switch evt.keyCode
             when 13 #return
                 if @props.submittable
@@ -539,7 +553,7 @@ RWizard = (name) -> rclass
         evt.nativeEvent.stopImmediatePropagation() # what ?!
         return false
 
-    render : ->
+    render: ->
         <Modal show={@props.show}
                onKeyUp={@handle_dialog_keyup}
                onHide={@close}
@@ -568,9 +582,9 @@ RWizard = (name) -> rclass
                         data       = {@props.data} />
 
             <Modal.Footer>
-                <Button onClick={@props.actions.hide}>Cancel</Button>
                 <Button onClick={@insert_code} disabled={not @props.submittable} bsStyle='success'>Only Code</Button>
                 <Button onClick={@insert_all} disabled={not @props.submittable} bsStyle='success'>Insert</Button>
+                <Button onClick={@props.actions.hide}>Close</Button>
             </Modal.Footer>
         </Modal>
 

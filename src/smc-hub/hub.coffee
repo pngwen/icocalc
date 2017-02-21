@@ -1,11 +1,13 @@
 ###
-This is the Salvus Global HUB module.  It runs as a daemon, sitting in the
+This is the SMC Global HUB.  It runs as a daemon, sitting in the
 middle of the action, connected to potentially thousands of clients,
-many Sage sessions, and a RethinkDB database cluster.  There are
-many HUBs running on VM's all over the installation.
+many Sage sessions, and PostgreSQL database.  There are
+many HUBs running.
 
-GPLv3
+AGPLv3
 ###
+
+require('coffee-cache')
 
 DEBUG = DEBUG2 = false
 
@@ -48,6 +50,8 @@ underscore     = require('underscore')
 {EventEmitter} = require('events')
 mime           = require('mime')
 
+program = undefined  # defined below -- can't import with nodev6 at module level when hub.coffee used as a module.
+
 # smc path configurations (shared with webpack)
 misc_node      = require('smc-util-node/misc_node')
 SMC_ROOT       = misc_node.SMC_ROOT
@@ -65,7 +69,6 @@ message = require('smc-util/message')     # salvus message protocol
 client_lib = require('smc-util/client')
 
 sage    = require('./sage')               # sage server
-rethink = require('./rethink')
 JSON_CHANNEL = client_lib.JSON_CHANNEL
 {send_email} = require('./email')
 
@@ -102,8 +105,6 @@ from_json = misc.from_json
 
 # third-party libraries: add any new nodejs dependencies to the NODEJS_PACKAGES list in build.py
 async   = require("async")
-program = require('commander')          # command line arguments -- https://github.com/visionmedia/commander.js/
-daemon  = require("start-stop-daemon")  # daemonize -- https://github.com/jiem/start-stop-daemon
 uuid    = require('node-uuid')
 
 Cookies = require('cookies')            # https://github.com/jed/cookies
@@ -667,6 +668,9 @@ class Client extends EventEmitter
             return
         switch mesg.type
             when 'console'
+                if not mesg.params?.path? or not mesg.params?.filename?
+                    @push_to_client(message.error(id:mesg.id, error:"console session path and filename must be defined"))
+                    return
                 @connect_to_console_session(mesg)
             else
                 # TODO
@@ -792,6 +796,12 @@ class Client extends EventEmitter
             event      : mesg.type
             error      : mesg.error
             account_id : @account_id
+
+    mesg_webapp_error: (mesg) =>
+        winston.debug("webapp_error: #{mesg.msg}")
+        mesg = misc.copy_without(mesg, 'event')
+        mesg.account_id = @account_id
+        database.webapp_error(mesg)
 
     ######################################################
     # Messages: Project Management
@@ -1405,7 +1415,9 @@ class Client extends EventEmitter
                         if err
                             cb(err)
                         else if not is_public
-                            cb("project with id '#{mesg.project_id}' is not public")
+                            cb("not_public") # be careful about changing this. This is a specific error we're giving now when a directory is not public.
+                            # Client figures out context and gives more detailed error message. Right now we use it in src/smc-webapp/project_files.cjsx
+                            # to provide user with helpful context based error about why they can't access a given directory
                         else
                             cb()
             (cb) =>
@@ -1532,8 +1544,10 @@ class Client extends EventEmitter
             options    : mesg.options
             changes    : if mesg.changes then mesg_id
             cb         : (err, result) =>
+                if result?.action == 'close'
+                    err = 'close'
                 if err
-                    dbg("user_query error: #{misc.to_json(err)}")
+                    dbg("user_query(query='#{to_json(query)}') error: #{misc.to_json(err)}")
                     if @_query_changefeeds?[mesg_id]
                         delete @_query_changefeeds[mesg_id]
                     @error_to_client(id:mesg_id, error:err)
@@ -2125,8 +2139,12 @@ class Client extends EventEmitter
             (cb) =>
                 if customer_id?
                     new_customer = false
-                    dbg("already signed up for stripe")
-                    cb()
+                    dbg("already signed up for stripe -- sync local user account with stripe")
+                    database.stripe_update_customer
+                        account_id  : mesg.account_id
+                        stripe      : stripe
+                        customer_id : customer_id
+                        cb          : cb
                 else
                     dbg("create stripe entry for this customer")
                     x =
@@ -2150,24 +2168,29 @@ class Client extends EventEmitter
                         customer_id : customer_id
                         cb          : cb
             (cb) =>
-                dbg("now create the invoice item")
-                stripe.invoiceItems.create
-                    customer    : customer_id
-                    amount      : mesg.amount*100
-                    currency    : "usd"
-                    description : mesg.description
-                ,
-                    (err, invoice_item) =>
-                        if err
-                            cb(err)
-                        else
-                            cb()
+                if not (mesg.amount? and mesg.description?)
+                    dbg("no amount or description -- not creating an invoice")
+                    cb()
+                else
+                    dbg("now create the invoice item")
+                    stripe.invoiceItems.create
+                        customer    : customer_id
+                        amount      : mesg.amount*100
+                        currency    : "usd"
+                        description : mesg.description
+                    ,
+                        (err, invoice_item) =>
+                            if err
+                                cb(err)
+                            else
+                                cb()
         ], (err) =>
             if err
                 @error_to_client(id:mesg.id, error:err)
             else
                 @success_to_client(id:mesg.id)
         )
+
 
 ##############################
 # File use tracking
@@ -2643,12 +2666,8 @@ create_account = (client, mesg, cb) ->
 
         (cb) ->
             dbg("run tests on generic validity of input")
+            # issues_with_create_account also does check is_valid_password!
             issues = client_lib.issues_with_create_account(mesg)
-
-            # Do not allow *really* stupid passwords.
-            [valid, reason] = is_valid_password(mesg.password)
-            if not valid
-                issues['password'] = reason
 
             # TODO -- only uncomment this for easy testing to allow any password choice.
             # the client test suite will then fail, which is good, so we are reminded to comment this out before release!
@@ -2758,7 +2777,7 @@ delete_account = (mesg, client, push_to_client) ->
     dbg = (m) -> winston.debug("delete_account(mesg.account_id): #{m}")
     dbg()
 
-    database.delete_account
+    database.mark_account_deleted
         account_id    : mesg.account_id
         cb            : (err) =>
             push_to_client(message.account_deleted(id:mesg.id, error:err))
@@ -3142,21 +3161,22 @@ reset_forgot_password = (mesg, client_ip_address, push_to_client) ->
 Connect to database
 ###
 database = undefined
+
 connect_to_database = (opts) ->
     opts = defaults opts,
-        error : 120
+        error : undefined   # ignored
         pool  : program.db_pool
         cb    : required
-    dbg = (m) -> winston.debug("connect_to_database: #{m}")
+    dbg = (m) -> winston.debug("connect_to_database (postgreSQL): #{m}")
     if database? # already did this
+        dbg("already done")
         opts.cb(); return
-    database = rethink.rethinkdb
-        hosts           : program.database_nodes.split(',')
-        database        : program.keyspace
-        error           : opts.error
-        pool            : opts.pool
+    dbg("connecting...")
+    database = require('./postgres').db
+        host     : program.database_nodes.split(',')[0]  # postgres has only one master server
+        database : program.keyspace
         concurrent_warn : program.db_concurrent_warn
-        cb              : opts.cb
+    database.connect(cb:opts.cb)
 
 # client for compute servers
 compute_server = undefined
@@ -3190,13 +3210,11 @@ update_primus = (cb) ->
 
 #############################################
 # Billing settings
-# How to set in database:
-#    db=require('rethink').rethinkdb();0
-#    db.set_server_setting(cb:console.log, name:'stripe_publishable_key', value:???)
-#    db.set_server_setting(cb:console.log, name:'stripe_secret_key',      value:???)
+# Set using the admin interface in account settings of an admin user.
 #############################################
 stripe  = undefined
-# TODO: this needs to listen to a changefeed on the database for changes to the server_settings table
+# TODO: this could listen to a changefeed on the database
+# for changes to the server_settings table.
 init_stripe = (cb) ->
     dbg = (m) -> winston.debug("init_stripe: #{m}")
     dbg()
@@ -3240,12 +3258,11 @@ init_stripe = (cb) ->
 delete_expired = (cb) ->
     async.series([
         (cb) ->
-            connect_to_database(error:99999, pool:5, cb:cb)
+            connect_to_database(cb:cb)
         (cb) ->
             database.delete_expired
-                count_only        : false
-                repeat_until_done : true
-                cb                : cb
+                count_only : false
+                cb         : cb
     ], cb)
 
 blob_maintenance = (cb) ->
@@ -3271,10 +3288,11 @@ stripe_sync = (dump_only, cb) ->
         (cb) ->
             dbg("get all customers from the database with stripe -- this is a full scan of the database and will take a while")
             # TODO: we could make this way faster by putting an index on the stripe_customer_id field.
-            q = database.table('accounts').filter((r)->r.hasFields('stripe_customer_id'))
-            q = q.pluck('account_id', 'stripe_customer_id', 'stripe_customer')
-            q.run (err, x) ->
-                users = x; cb(err)
+            database._query
+                query : 'SELECT account_id, stripe_customer_id, stripe_customer FROM accounts WHERE stripe_customer_id IS NOT NULL'
+                cb    : (err, x) ->
+                    users = x?.rows
+                    cb(err)
         (cb) ->
             dbg("dump stripe_customer data to file for statistical analysis")
             target = "#{process.env.HOME}/stripe/"
@@ -3291,8 +3309,8 @@ stripe_sync = (dump_only, cb) ->
                 # these could all be embarassing if this backup "got out" -- remove anything about actual credit card
                 # and person's name/email.
                 y = misc.copy_with(x.stripe_customer, ['created', 'subscriptions', 'metadata'])
-                y.subscriptions = y.subscriptions.data
-                y.metadata = y.metadata.account_id?.slice(0,8)
+                y.subscriptions = y.subscriptions?.data
+                y.metadata = y.metadata?.account_id?.slice(0,8)
                 dump.push(y)
             fs.writeFile("#{target}/stripe_customers-#{misc.to_iso(new Date())}.json", misc.to_json(dump), cb)
         (cb) ->
@@ -3554,76 +3572,86 @@ add_user_to_project = (project_id, email_address, cb) ->
 # Process command line arguments
 #############################################
 
-program.usage('[start/stop/restart/status/nodaemon] [options]')
-    .option('--port <n>', 'port to listen on (default: 5000; 0 -- do not start)', ((n)->parseInt(n)), 5000)
-    .option('--proxy_port <n>', 'port that the proxy server listens on (default: 0 -- do not start)', ((n)->parseInt(n)), 0)
-    .option('--log_level [level]', "log level (default: debug) useful options include INFO, WARNING and DEBUG", String, "debug")
-    .option('--host [string]', 'host of interface to bind to (default: "127.0.0.1")', String, "127.0.0.1")
-    .option('--pidfile [string]', 'store pid in this file (default: "data/pids/hub.pid")', String, "data/pids/hub.pid")
-    .option('--logfile [string]', 'write log to this file (default: "data/logs/hub.log")', String, "data/logs/hub.log")
-    .option('--statsfile [string]', 'if set, this file contains periodically updated metrics (default: null, suggest value: "data/logs/stats.json")', String, null)
-    .option('--database_nodes <string,string,...>', 'comma separated list of ip addresses of all database nodes in the cluster', String, 'localhost')
-    .option('--keyspace [string]', 'Database name to use (default: "smc")', String, 'smc')
-    .option('--passwd [email_address]', 'Reset password of given user', String, '')
-    .option('--update', 'Update schema and primus on startup (always true for --dev; otherwise, false)')
-    .option('--stripe_sync', 'Sync stripe subscriptions to database for all users with stripe id', String, 'yes')
-    .option('--stripe_dump', 'Dump stripe subscriptions info to ~/stripe/', String, 'yes')
-    .option('--delete_expired', 'Delete expired data from the database', String, 'yes')
-    .option('--blob_maintenance', 'Do blob-related maintenance (dump to tarballs, offload to gcloud)', String, 'yes')
-    .option('--add_user_to_project [project_id,email_address]', 'Add user with given email address to project with given ID', String, '')
-    .option('--base_url [string]', 'Base url, so https://sitenamebase_url/', String, '')  # '' or string that starts with /
-    .option('--local', 'If option is specified, then *all* projects run locally as the same user as the server and store state in .sagemathcloud-local instead of .sagemathcloud; also do not kill all processes on project restart -- for development use (default: false, since not given)', Boolean, false)
-    .option('--foreground', 'If specified, do not run as a deamon')
-    .option('--dev', 'if given, then run in VERY UNSAFE single-user local dev mode')
-    .option('--single', 'if given, then run in LESS SAFE single-machine mode')
-    .option('--db_pool <n>', 'number of db connections in pool (default: 50)', ((n)->parseInt(n)), 50)
-    .option('--db_concurrent_warn <n>', 'be very unhappy if number of concurrent db requests exceeds this (default: 300)', ((n)->parseInt(n)), 300)
-    .parse(process.argv)
+command_line = () ->
+    program = require('commander')          # command line arguments -- https://github.com/visionmedia/commander.js/
+    daemon  = require("start-stop-daemon")  # don't import unless in a script; otherwise breaks in node v6+
+    default_db = process.env.PGHOST ? 'localhost'
 
-    # NOTE: the --local option above may be what is used later for single user installs, i.e., the version included with Sage.
+    program.usage('[start/stop/restart/status/nodaemon] [options]')
+        .option('--port <n>', 'port to listen on (default: 5000; 0 -- do not start)', ((n)->parseInt(n)), 5000)
+        .option('--proxy_port <n>', 'port that the proxy server listens on (default: 0 -- do not start)', ((n)->parseInt(n)), 0)
+        .option('--log_level [level]', "log level (default: debug) useful options include INFO, WARNING and DEBUG", String, "debug")
+        .option('--host [string]', 'host of interface to bind to (default: "127.0.0.1")', String, "127.0.0.1")
+        .option('--pidfile [string]', 'store pid in this file (default: "data/pids/hub.pid")', String, "data/pids/hub.pid")
+        .option('--logfile [string]', 'write log to this file (default: "data/logs/hub.log")', String, "data/logs/hub.log")
+        .option('--statsfile [string]', 'if set, this file contains periodically updated metrics (default: null, suggest value: "data/logs/stats.json")', String, null)
+        .option('--database_nodes <string,string,...>', "database address (default: '#{default_db}')", String, default_db)
+        .option('--keyspace [string]', 'Database name to use (default: "smc")', String, 'smc')
+        .option('--passwd [email_address]', 'Reset password of given user', String, '')
+        .option('--update', 'Update schema and primus on startup (always true for --dev; otherwise, false)')
+        .option('--stripe_sync', 'Sync stripe subscriptions to database for all users with stripe id', String, 'yes')
+        .option('--stripe_dump', 'Dump stripe subscriptions info to ~/stripe/', String, 'yes')
+        .option('--delete_expired', 'Delete expired data from the database', String, 'yes')
+        .option('--blob_maintenance', 'Do blob-related maintenance (dump to tarballs, offload to gcloud)', String, 'yes')
+        .option('--add_user_to_project [project_id,email_address]', 'Add user with given email address to project with given ID', String, '')
+        .option('--base_url [string]', 'Base url, so https://sitenamebase_url/', String, '')  # '' or string that starts with /
+        .option('--local', 'If option is specified, then *all* projects run locally as the same user as the server and store state in .sagemathcloud-local instead of .sagemathcloud; also do not kill all processes on project restart -- for development use (default: false, since not given)', Boolean, false)
+        .option('--foreground', 'If specified, do not run as a deamon')
+        .option('--dev', 'if given, then run in VERY UNSAFE single-user local dev mode')
+        .option('--single', 'if given, then run in LESS SAFE single-machine mode')
+        .option('--db_pool <n>', 'number of db connections in pool (default: 1)', ((n)->parseInt(n)), 1)
+        .option('--db_concurrent_warn <n>', 'be very unhappy if number of concurrent db requests exceeds this (default: 300)', ((n)->parseInt(n)), 300)
+        .parse(process.argv)
 
-if program._name.slice(0,3) == 'hub'
-    # run as a server/daemon (otherwise, is being imported as a library)
+        # NOTE: the --local option above may be what is used later for single user installs, i.e., the version included with Sage.
 
-    #if program.rawArgs[1] in ['start', 'restart']
-    process.addListener "uncaughtException", (err) ->
-        winston.debug("BUG ****************************************************************************")
-        winston.debug("Uncaught exception: " + err)
-        winston.debug(err.stack)
-        winston.debug("BUG ****************************************************************************")
+    if program._name.slice(0,3) == 'hub'
+        # run as a server/daemon (otherwise, is being imported as a library)
 
-    if program.passwd
-        console.log("Resetting password")
-        reset_password(program.passwd, (err) -> process.exit())
-    else if program.stripe_sync
-        console.log("Stripe sync")
-        stripe_sync(false, (err) -> winston.debug("DONE", err); process.exit())
-    else if program.stripe_dump
-        console.log("Stripe dump")
-        stripe_sync(true, (err) -> winston.debug("DONE", err); process.exit())
-    else if program.delete_expired
-        delete_expired (err) ->
-            winston.debug("DONE", err)
-            process.exit()
-    else if program.blob_maintenance
-        blob_maintenance (err) ->
-            winston.debug("DONE", err)
-            process.exit()
-    else if program.add_user_to_project
-        console.log("Adding user to project")
-        v = program.add_user_to_project.split(',')
-        add_user_to_project v[0], v[1], (err) ->
-            if err
-                 console.log("Failed to add user: #{err}")
-            else
-                 console.log("User added to project.")
-            process.exit()
-    else
-        console.log("Running hub; pidfile=#{program.pidfile}, port=#{program.port}, proxy_port=#{program.proxy_port}")
-        # logFile = /dev/null to prevent huge duplicated output that is already in program.logfile
-        if program.foreground
-            start_server (err) ->
-                if err and program.dev
-                    process.exit(1)
+        #if program.rawArgs[1] in ['start', 'restart']
+        process.addListener "uncaughtException", (err) ->
+            winston.debug("BUG ****************************************************************************")
+            winston.debug("Uncaught exception: " + err)
+            winston.debug(err.stack)
+            winston.debug("BUG ****************************************************************************")
+            database?.uncaught_exception(err)
+
+        if program.passwd
+            console.log("Resetting password")
+            reset_password(program.passwd, (err) -> process.exit())
+        else if program.stripe_sync
+            console.log("Stripe sync")
+            stripe_sync(false, (err) -> winston.debug("DONE", err); process.exit())
+        else if program.stripe_dump
+            console.log("Stripe dump")
+            stripe_sync(true, (err) -> winston.debug("DONE", err); process.exit())
+        else if program.delete_expired
+            delete_expired (err) ->
+                winston.debug("DONE", err)
+                process.exit()
+        else if program.blob_maintenance
+            blob_maintenance (err) ->
+                winston.debug("DONE", err)
+                process.exit()
+        else if program.add_user_to_project
+            console.log("Adding user to project")
+            v = program.add_user_to_project.split(',')
+            add_user_to_project v[0], v[1], (err) ->
+                if err
+                     console.log("Failed to add user: #{err}")
+                else
+                     console.log("User added to project.")
+                process.exit()
         else
-            daemon({pidFile:program.pidfile, outFile:program.logfile, errFile:program.logfile, logFile:'/dev/null', max:30}, start_server)
+            console.log("Running hub; pidfile=#{program.pidfile}, port=#{program.port}, proxy_port=#{program.proxy_port}")
+            # logFile = /dev/null to prevent huge duplicated output that is already in program.logfile
+            if program.foreground
+                start_server (err) ->
+                    if err and program.dev
+                        process.exit(1)
+            else
+                daemon({pidFile:program.pidfile, outFile:program.logfile, errFile:program.logfile, logFile:'/dev/null', max:30}, start_server)
+
+
+if process.argv.length > 1
+    command_line()

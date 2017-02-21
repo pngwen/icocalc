@@ -1,5 +1,8 @@
 # Developing SMC on a personal laptop
 
+TODO: This will not work since it needs to be updated for PostgreSQL.
+See the dev/single for hints.
+
 Scripts for doing development of SMC on a personal single-user laptop
 that you fully control.  You _**must not**_ have anything else listening
 on ports 5000, 5001, 8080, 28015 and 29015.
@@ -8,7 +11,8 @@ on ports 5000, 5001, 8080, 28015 and 29015.
 ## Prerequisites:
 
 - Make sure that the `python` in the PATH is Python version 2.7
-- Install Node.js version 5.x
+- Install Node.js version 6.x.
+- Install the forever npm node package: `sudo npm install -g forever`
 - Install RethinkDB >= 2.1.5
   - Installation from source works using the usual
     `./configure && make && make install`
@@ -22,7 +26,16 @@ on ports 5000, 5001, 8080, 28015 and 29015.
 
 ## Build SMC
 
-- run `source smv-env && npm run make`
+From the `src/` directory:
+
+- run `source smc-env && npm run make`
+
+## Install the Python libraries
+
+From the `src/` directory, run
+
+    pip install --user --upgrade smc_sagews/
+    pip install --user --upgrade smc_pyutil/
 
 
 ## The servers

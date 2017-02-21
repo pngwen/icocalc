@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2014, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -19,12 +19,9 @@
 #
 ###############################################################################
 
-
 ###
 #
 # Library for working with JSON messages for Salvus.
-#
-# (c) 2012, William Stein
 #
 # We use functions to work with messages to ensure some level of
 # consistency, defaults, and avoid errors from typos, etc.
@@ -640,14 +637,16 @@ message
     account_id : required
 
 message
-    event      : 'invite_noncloud_collaborators'
-    id         : undefined
-    project_id : required
-    to         : required
-    subject    : undefined
-    email      : required    # spam vector
-    title      : required
-    link2proj  : required
+    event         : 'invite_noncloud_collaborators'
+    id            : undefined
+    project_id    : required
+    replyto       : undefined
+    replyto_name  : undefined
+    to            : required
+    subject       : undefined
+    email         : required    # spam vector
+    title         : required
+    link2proj     : required
 
 message
     event      : 'invite_noncloud_collaborators_resp'
@@ -854,7 +853,26 @@ message
     event : 'log_client_error'
     error : required
 
-
+message
+    event        : 'webapp_error'
+    name         : required  # string
+    message      : required  # string
+    comment      : undefined # string
+    stacktrace   : undefined # string
+    file         : undefined # string
+    path         : undefined # string
+    lineNumber   : undefined # int
+    columnNumber : undefined # int
+    severity     : undefined # string
+    browser      : undefined # string, how feature.coffee detected the browser
+    mobile       : undefined # boolean, feature.coffee::IS_MOBILE
+    responsive   : undefined # boolean, feature.coffee::is_responsive_mode
+    user_agent   : undefined # string
+    smc_version  : undefined # string
+    build_date   : undefined # string
+    smc_git_rev  : undefined # string
+    uptime       : undefined # string
+    start_time   : undefined # timestamp
 
 
 #############################################
@@ -978,8 +996,9 @@ message
     id          : undefined
     email_address : undefined # one of email or account_id must be given.
     account_id  : undefined   # user who will be invoiced
-    amount      : required   # currently in US dollars
-    description : required
+    amount      : undefined   # currently in US dollars  (if amount or desc not given, then only creates customer, not invoice)
+    description : undefined
+
 
 #############
 # Support Tickets → right now going through Zendesk

@@ -23,7 +23,7 @@ underscore = require('underscore')
 
 {React, ReactDOM, Actions, Store, rtypes, rclass, Redux}  = require('./smc-react')
 
-{Col, Row, Button, Input, Well, Alert} = require('react-bootstrap')
+{Col, Row, Button, FormControl, FormGroup, Well, InputGroup, Alert, Checkbox} = require('react-bootstrap')
 {Icon, Loading, Space, ImmutablePureRenderMixin} = require('./r_misc')
 misc            = require('smc-util/misc')
 misc_page       = require('./misc_page')
@@ -40,7 +40,7 @@ ProjectSearchInput = rclass
         user_input : rtypes.string.isRequired
         actions    : rtypes.object.isRequired
 
-    clear_and_focus_input : ->
+    clear_and_focus_input: ->
         @props.actions.setState
             user_input         : ''
             most_recent_path   : undefined
@@ -49,31 +49,37 @@ ProjectSearchInput = rclass
             search_results     : undefined
             search_error       : undefined
 
-        @refs.project_search_input.getInputDOMNode().focus()
+        ReactDOM.findDOMNode(@refs.project_search_input).focus()
 
-    clear_button : ->
+    clear_button: ->
         <Button onClick={@clear_and_focus_input}>
             <Icon name='times-circle' />
         </Button>
 
-    handle_change : ->
-        user_input = @refs.project_search_input.getValue()
+    handle_change: ->
+        user_input = ReactDOM.findDOMNode(@refs.project_search_input).value
         @props.actions.setState(user_input : user_input)
 
-    submit : (event) ->
+    submit: (event) ->
         event.preventDefault()
         @props.actions.search()
 
-    render : ->
+    render: ->
         <form onSubmit={@submit}>
-            <Input
-                ref         = 'project_search_input'
-                autoFocus
-                type        = 'text'
-                placeholder = 'Enter search (supports regular expressions!)'
-                value       = {@props.user_input}
-                buttonAfter = {@clear_button()}
-                onChange    = {@handle_change} />
+            <FormGroup>
+                <InputGroup>
+                    <FormControl
+                        ref         = 'project_search_input'
+                        autoFocus
+                        type        = 'text'
+                        placeholder = 'Enter search (supports regular expressions!)'
+                        value       = {@props.user_input}
+                        onChange    = {@handle_change} />
+                    <InputGroup.Button>
+                        {@clear_button()}
+                    </InputGroup.Button>
+                </InputGroup>
+            </FormGroup>
         </form>
 
 ProjectSearchOutput = rclass
@@ -86,12 +92,12 @@ ProjectSearchOutput = rclass
         most_recent_path : rtypes.string
         actions          : rtypes.object.isRequired
 
-    too_many_results : ->
+    too_many_results: ->
         <Alert bsStyle='warning'>
             There were more results than displayed below. Try making your search more specific.
         </Alert>
 
-    get_results : ->
+    get_results: ->
         if @props.search_error?
             return <Alert bsStyle='warning'>Search error: {@props.search_error} Please
                     try again with a more restrictive search</Alert>
@@ -105,7 +111,7 @@ ProjectSearchOutput = rclass
                     most_recent_path = {@props.most_recent_path}
                     actions          = {@props.actions} />
 
-    render : ->
+    render: ->
         results_well_styles =
             backgroundColor : 'white'
             fontFamily      : 'monospace'
@@ -129,19 +135,19 @@ ProjectSearchOutputHeader = rclass
         search_error       : rtypes.string
         actions            : rtypes.object.isRequired
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         info_visible : false
 
-    output_path : ->
+    output_path: ->
         path = @props.most_recent_path
         if path is ''
             return <Icon name='home' />
         return path
 
-    change_info_visible : ->
+    change_info_visible: ->
         @props.actions.setState(info_visible : not @props.info_visible)
 
-    get_info : ->
+    get_info: ->
         <Alert bsStyle='info'>
             <ul>
                 <li>
@@ -153,10 +159,10 @@ ProjectSearchOutputHeader = rclass
             </ul>
         </Alert>
 
-    render : ->
+    render: ->
         <div style={wordWrap:'break-word'}>
             <span style={color:'#666'}>
-                <a onClick={=>@props.actions.set_focused_page('project-file-listing')}
+                <a onClick={=>@props.actions.set_active_tab('files')}
                    style={cursor:'pointer'} >Navigate to a different folder</a> to search in it.
             </span>
 
@@ -172,8 +178,8 @@ ProjectSearchOutputHeader = rclass
             {@get_info() if @props.info_visible}
         </div>
 
-ProjectSearch = (name) -> rclass
-    displayName : 'ProjectSearch'
+ProjectSearchBody = rclass ({name}) ->
+    displayName : 'ProjectSearchBody'
 
     reduxProps :
         "#{name}" :
@@ -193,13 +199,13 @@ ProjectSearch = (name) -> rclass
     propTypes :
         actions : rtypes.object.isRequired
 
-    getDefaultProps : ->
+    getDefaultProps: ->
         user_input : ''
 
-    valid_search : ->
+    valid_search: ->
         return @props.user_input.trim() isnt ''
 
-    render_output_header : ->
+    render_output_header: ->
         <ProjectSearchOutputHeader
             most_recent_path   = {@props.most_recent_path}
             command            = {@props.command}
@@ -209,7 +215,7 @@ ProjectSearch = (name) -> rclass
             info_visible       = {@props.info_visible}
             actions            = {@props.actions} />
 
-    render_output : ->
+    render_output: ->
         if @props.search_results? or @props.search_error?
             return <ProjectSearchOutput
                 most_recent_path = {@props.most_recent_path}
@@ -221,7 +227,7 @@ ProjectSearch = (name) -> rclass
             # a search has been made but the search_results or search_error hasn't come in yet
             <Loading />
 
-    render : ->
+    render: ->
         <Well>
             <Row>
                 <Col sm=8>
@@ -241,21 +247,21 @@ ProjectSearch = (name) -> rclass
                 </Col>
 
                 <Col sm=4 style={fontSize:'16px'}>
-                    <Input
-                        type     = 'checkbox'
-                        label    = 'Include subdirectories'
+                    <Checkbox
                         checked  = {@props.subdirectories}
-                        onChange = {@props.actions.toggle_search_checkbox_subdirectories} />
-                    <Input
-                        type     = 'checkbox'
-                        label    = 'Case sensitive search'
+                        onChange = {@props.actions.toggle_search_checkbox_subdirectories}>
+                        Include subdirectories
+                    </Checkbox>
+                    <Checkbox
                         checked  = {@props.case_sensitive}
-                        onChange = {@props.actions.toggle_search_checkbox_case_sensitive} />
-                    <Input
-                        type     = 'checkbox'
-                        label    = 'Include hidden files'
+                        onChange = {@props.actions.toggle_search_checkbox_case_sensitive}>
+                        Case sensitive search
+                    </Checkbox>
+                    <Checkbox
                         checked  = {@props.hidden_files}
-                        onChange = {@props.actions.toggle_search_checkbox_hidden_files} />
+                        onChange = {@props.actions.toggle_search_checkbox_hidden_files}>
+                        Include hidden files
+                    </Checkbox>
                 </Col>
             </Row>
             <Row>
@@ -276,19 +282,19 @@ ProjectSearchResultLine = rclass
         most_recent_path : rtypes.string
         actions          : rtypes.object.isRequired
 
-    click_filename : (e) ->
+    click_filename: (e) ->
         e.preventDefault()
         @props.actions.open_file
             path       : misc.path_to_file(@props.most_recent_path, @props.filename)
             foreground : misc.should_open_in_foreground(e)
 
-    render : ->
+    render: ->
         <div style={wordWrap:'break-word'}>
             <a onClick={@click_filename} href=''><strong>{@props.filename}</strong></a>
             <span style={color:'#666'}> {@props.description}</span>
         </div>
 
-ProjectSearchHeader = (name) -> rclass
+ProjectSearchHeader = rclass ({name}) ->
     displayName : 'ProjectSearch-ProjectSearchHeader'
 
     mixins: [ImmutablePureRenderMixin]
@@ -300,37 +306,24 @@ ProjectSearchHeader = (name) -> rclass
     propTypes :
         actions : rtypes.object.isRequired
 
-    render : ->
-        <h1>
+    render: ->
+        <h1 style={marginTop:"0px"}>
             <Icon name='search' /> Search <span className='hidden-xs'> in <PathLink path={@props.current_path} actions={@props.actions} /></span>
         </h1>
 
-render = (project_id, redux) ->
-    store   = redux.getProjectStore(project_id)
-    actions = redux.getProjectActions(project_id)
+exports.ProjectSearch = rclass ({name}) ->
+    displayName : 'ProjectSearch'
 
-    ProjectSearchHeader_connected = ProjectSearchHeader(store.name)
-    ProjectSearch_connected       = ProjectSearch(store.name)
-    <div>
-        <Row>
-            <Col sm=12>
-                <Redux redux={redux}>
-                    <ProjectSearchHeader_connected actions={actions} />
-                </Redux>
-            </Col>
-        </Row>
-        <Row>
-            <Col sm=12>
-                <Redux redux={redux}>
-                    <ProjectSearch_connected actions={actions}/>
-                </Redux>
-            </Col>
-        </Row>
-    </div>
-
-exports.render_project_search = (project_id, dom_node, redux) ->
-    ReactDOM.render(render(project_id, redux), dom_node)
-
-exports.unmount = (dom_node) ->
-    #console.log("unmount project_search")
-    ReactDOM.unmountComponentAtNode(dom_node)
+    render: ->
+        <div style={padding:'15px'}>
+            <Row>
+                <Col sm=12>
+                    <ProjectSearchHeader actions={@actions(name)} name={name} />
+                </Col>
+            </Row>
+            <Row>
+                <Col sm=12>
+                    <ProjectSearchBody actions={@actions(name)} name={name} />
+                </Col>
+            </Row>
+        </div>

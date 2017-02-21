@@ -2,7 +2,7 @@
 #
 # SageMathCloud: A collaborative web-based interface to Sage, IPython, LaTeX and the Terminal.
 #
-#    Copyright (C) 2014, William Stein
+#    Copyright (C) 2016, Sagemath Inc.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -27,6 +27,8 @@ This file defines a jQuery plugin ".sage_interact(...)" that replaces a DOM elem
 by one with interactive controls and output.
 ###
 
+$ = window.$
+
 misc = require('smc-util/misc')
 
 {defaults, required} = misc
@@ -38,6 +40,7 @@ $.fn.extend
             desc                : required
             execute_code        : required
             process_output_mesg : required
+            process_html_output : required
             start               : undefined
             stop                : undefined
 
@@ -68,6 +71,7 @@ class Interact
             #           process_output_mesg(element:jQuery wrapped output DOM element, mesg:message output from execute_code)
 
             process_output_mesg : required
+            process_html_output : required
 
             # start(@) called when execution of code starts due to user manipulating a control
             start : undefined
@@ -91,7 +95,7 @@ class Interact
                     control.data("set")(control_desc.default)
                 else
                     # No control yet, so make one.
-                    new_control = interact_control(control_desc, @element.data('update'))
+                    new_control = interact_control(control_desc, @element.data('update'), @opts.process_html_output)
                     $(C).append(new_control)
                     new_control.data('refresh')?()
         else
@@ -99,7 +103,7 @@ class Interact
             row       = $("<div class='row'></div>")
             container = $("<div class='salvus-interact-var-#{var0}'></div>")
             row.append(container)
-            new_control = interact_control(control_desc, @element.data('update'))
+            new_control = interact_control(control_desc, @element.data('update'), @opts.process_html_output)
             if new_control?
                 container.append(new_control)
                 @element.append(row)
@@ -135,7 +139,7 @@ class Interact
         # Define the update function, which communicates with the server.
         done = true
         update = (vals) =>
-            # TODO: flicker?
+            # FUTURE: flicker?
             #for output_cell in output_cells
             #    if not desc.flicker
             #        height = output_cell._output.height()
@@ -168,7 +172,7 @@ class Interact
             if labels[control_desc.var]?
                 control_desc.label = labels[control_desc.var]
             for X in containing_div
-                c = interact_control(control_desc, update)
+                c = interact_control(control_desc, update, @opts.process_html_output)
                 created_controls.push(c)
                 $(X).append(c)
 
@@ -191,9 +195,9 @@ parse_width = (width) ->
         if typeof width == 'number'
             return "#{width}ex"
         else
-            return width1
+            return width
 
-interact_control = (desc, update) ->
+interact_control = (desc, update, process_html_output) ->
     # Create and return a detached DOM element elt that represents
     # the interact control described by desc.  It will call update
     # when it changes.  If @element.data('refresh') is defined, it will
@@ -203,7 +207,7 @@ interact_control = (desc, update) ->
     control = templates.find(".salvus-interact-control-#{desc.control_type}").clone()
     if control.length == 0
         # nothing to do -- the control no longer exists (deprecated?)
-        # TODO: we should probably send a message somewhere saying this no longer exists.
+        # WARNING: we should probably send a message somewhere saying this no longer exists.
         return
     if desc.label?
         control.find(".salvus-interact-label").html(desc.label).mathjax()
@@ -240,6 +244,7 @@ interact_control = (desc, update) ->
 
             set = (val) ->
                 input.val(val)
+                process_html_output(input)
 
             input.on 'blur', () ->
                 if input.val() != last_sent_val
@@ -289,7 +294,9 @@ interact_control = (desc, update) ->
             set = (val) ->
                 if text.data('val')?
                     # it has already appeared, so safe to mathjax immediately
-                    text.html(val).mathjax()
+                    text.html(val)
+                    process_html_output(text)
+                    text.mathjax()
 
                 text.data('val', val)
 
@@ -469,12 +476,16 @@ interact_control = (desc, update) ->
                     else
                         val = String(val)
                         for opt in select.find("option")
+                            opt = $(opt)
                             if opt.attr("value") == val
                                 opt.attr("selected", true)
         else
             throw("Unknown interact control type '#{desc.control_type}'")
 
-    set(desc.default)
+    # fix HTML links and <img src=...> in interacts, but not additionally in nested ones (e.g. %exercise)
+    e = $('<div>').html(desc.default)
+    process_html_output(e)
+    set(e.html())
     control.data("set", set)
     return control
 
